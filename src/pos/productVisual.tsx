@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react'
 
-/** Dateiname in `public/assets/products/` ohne `p-` oder Sonder‑Mapping */
+/** Dateiname unter `public/assets/products/` ohne `p-`, ggf. Sonder-Mapping */
 const ID_TO_PRODUCT_SLUG: Record<string, string> = {
   'p-rote': 'rote-wurst',
   'p-bitterlemon': 'bitter-lemon',
   'p-kuchenstueck': 'kuchenstueck',
   'p-broetchen': 'broetchen',
   'p-veg': 'vegetarisch',
-  /** Kombi-Angebot: kein gemeinsames Foto → Emoji */
+  /** Kombi-Angebot */
   'p-kk': '',
 }
 
@@ -53,22 +53,19 @@ function emojiForProduct(name: string): string {
   return '🛒'
 }
 
-/** Kachel‑Bild links: bevorzugt PNG unter `public/assets/products/`, sonst Emoji. */
+/** Linksbereich der Kachel: Bild wird in den Rahmen skaliert (nicht umgekehrt). */
 export function ProductVisual(props: {
   productId: string
   name: string
   categoryId: string
   imageUrl?: string | null
 }) {
-  const id = props.categoryId.toLowerCase()
-  const hue = /kuchen|cake/.test(id) ? 45 : /essen|food/.test(id) ? 28 : 0
+  const cat = props.categoryId.toLowerCase()
+  const hue = /kuchen|cake/.test(cat) ? 45 : /essen|food/.test(cat) ? 28 : 0
   const emoji = emojiForProduct(props.name)
   const src = useMemo(
     () =>
-      resolvedImageSrc(
-        props.productId,
-        props.imageUrl ?? null,
-      ),
+      resolvedImageSrc(props.productId, props.imageUrl ?? null),
     [props.productId, props.imageUrl],
   )
   const [imgFailed, setImgFailed] = useState(false)
@@ -76,7 +73,7 @@ export function ProductVisual(props: {
 
   return (
     <div
-      className="relative flex h-full min-h-[72px] w-[44%] shrink-0 items-center justify-center overflow-hidden rounded-l-xl border-r border-red-500/40"
+      className="relative h-full max-h-full min-h-0 w-[42%] max-w-[6.75rem] shrink-0 overflow-hidden rounded-l-xl border-r border-red-500/40"
       style={
         showImg ?
           { background: '#050505' }
@@ -87,14 +84,16 @@ export function ProductVisual(props: {
       }
     >
       {showImg && src ?
-        <img
-          src={src}
-          alt=""
-          draggable={false}
-          className="h-full min-h-[72px] w-full object-cover object-center"
-          onError={() => setImgFailed(true)}
-        />
-      : <span className="select-none text-4xl drop-shadow-[0_0_12px_rgba(255,215,0,0.35)]">
+        <div className="flex h-full w-full items-center justify-center p-1 sm:p-1.5">
+          <img
+            src={src}
+            alt=""
+            draggable={false}
+            className="max-h-full max-w-full object-contain object-center"
+            onError={() => setImgFailed(true)}
+          />
+        </div>
+      : <span className="flex h-full w-full select-none items-center justify-center text-2xl drop-shadow-[0_0_12px_rgba(255,215,0,0.35)] sm:text-3xl">
           {emoji}
         </span>
       }

@@ -605,7 +605,7 @@ export function PosScreen({
           </nav>
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-[#ff003c]/25 bg-neutral-950/80 p-3 shadow-[inset_0_0_40px_rgba(0,0,0,0.6)]">
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
               {products.map((p) => {
                 const soldOut = Boolean(
                   p.stockTracking && Number(p.stockQty ?? 0) <= 0,
@@ -617,7 +617,7 @@ export function PosScreen({
                     disabled={soldOut}
                     onClick={() => addProduct(p.id, p.name, p.priceCents)}
                     className={[
-                      'flex min-h-[104px] w-full overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98]',
+                      'flex h-[5.85rem] w-full shrink-0 items-stretch overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98] sm:h-[6.35rem]',
                       'shadow-[0_0_22px_rgba(255,0,60,0.35)] hover:shadow-[0_0_32px_rgba(255,0,60,0.5)]',
                       soldOut ? 'opacity-50 grayscale' : '',
                       tapId === p.id ? 'animate-tap' : '',
@@ -630,16 +630,16 @@ export function PosScreen({
                       categoryId={p.categoryId}
                       imageUrl={p.imageUrl}
                     />
-                    <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-3 py-2">
+                    <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5 py-2 pl-2 pr-2 leading-tight sm:pl-2.5">
                       {soldOut && (
-                        <span className="text-xs font-black uppercase tracking-wider text-red-400">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-red-400">
                           AUSVERKAUFT
                         </span>
                       )}
-                      <span className="text-base font-bold leading-tight text-white md:text-lg">
+                      <span className="text-sm font-bold leading-snug text-white sm:text-[0.9375rem]">
                         {p.name}
                       </span>
-                      <span className="text-lg font-black text-[#FFD700] md:text-xl">
+                      <span className="text-base font-black tabular-nums text-[#FFD700] sm:text-lg">
                         {formatMoney(p.priceCents)}
                       </span>
                     </div>
