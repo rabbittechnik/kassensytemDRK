@@ -12,9 +12,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg'],
       manifest: {
-        name: 'DRK Kasse',
-        short_name: 'DRK Kasse',
-        description: 'Touch-Kassensystem für DRK-Veranstaltungen (offline)',
+        name: 'DLRG Kasse',
+        short_name: 'DLRG Kasse',
+        description: 'Touch-Kassensystem für DLRG-Veranstaltungen (offline)',
         theme_color: '#0a0e17',
         background_color: '#05080f',
         display: 'standalone',

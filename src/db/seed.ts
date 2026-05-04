@@ -34,6 +34,12 @@ function defaultProducts(): {
     p('p-spezi', CAT_IDS.drinks, 'Spezi', 250),
     p('p-kaffee', CAT_IDS.drinks, 'Kaffee', 200),
     p('p-tee', CAT_IDS.drinks, 'Tee', 200),
+    p('p-apfelschorle', CAT_IDS.drinks, 'Apfelschorle', 250),
+    p('p-energy', CAT_IDS.drinks, 'Energy', 300),
+    p('p-eistee', CAT_IDS.drinks, 'Eistee', 250),
+    p('p-limo', CAT_IDS.drinks, 'Limo', 250),
+    p('p-orangensaft', CAT_IDS.drinks, 'Orangensaft', 250),
+    p('p-bitterlemon', CAT_IDS.drinks, 'Bitter Lemon', 250),
     p('p-rote', CAT_IDS.food, 'Rote Wurst', 350),
     p('p-curry', CAT_IDS.food, 'Currywurst', 450),
     p('p-pommes', CAT_IDS.food, 'Pommes', 300),
@@ -44,6 +50,37 @@ function defaultProducts(): {
     p('p-muffin', CAT_IDS.cake, 'Muffin', 200),
     p('p-kk', CAT_IDS.cake, 'Kaffee + Kuchen Kombi', 400),
   ]
+}
+
+/** Zusätzliche Artikel & DLRG-Branding für bestehende Installationen */
+async function migrateDlrgExtras(): Promise<void> {
+  const org = await db.settings.get('orgName')
+  if (org?.value === 'DRK') {
+    await db.settings.put({ key: 'orgName', value: 'DLRG' })
+  }
+  const last = (await db.products.orderBy('sortOrder').last())?.sortOrder ?? 0
+  let o = last + 10
+  const extras = defaultProducts().filter((row) =>
+    [
+      'p-apfelschorle',
+      'p-energy',
+      'p-eistee',
+      'p-limo',
+      'p-orangensaft',
+      'p-bitterlemon',
+    ].includes(row.id),
+  )
+  for (const row of extras) {
+    const exists = await db.products.get(row.id)
+    if (!exists) {
+      await db.products.add({
+        ...row,
+        sortOrder: o,
+        active: true,
+      })
+      o += 10
+    }
+  }
 }
 
 export async function ensureSeed(): Promise<void> {
@@ -61,8 +98,8 @@ export async function ensureSeed(): Promise<void> {
       }
       const hash = await sha256Hex('1234')
       await db.settings.bulkPut([
-        { key: 'seedVersion', value: '1' },
-        { key: 'orgName', value: 'DRK' },
+        { key: 'seedVersion', value: '2' },
+        { key: 'orgName', value: 'DLRG' },
         { key: 'receiptFooter', value: 'Vielen Dank für Ihren Einkauf' },
         { key: 'nextReceiptNo', value: '1' },
         { key: 'adminPinHash', value: hash },
@@ -75,5 +112,6 @@ export async function ensureSeed(): Promise<void> {
       const hash = await sha256Hex('1234')
       await db.settings.put({ key: 'adminPinHash', value: hash })
     }
+    await migrateDlrgExtras()
   }
 }

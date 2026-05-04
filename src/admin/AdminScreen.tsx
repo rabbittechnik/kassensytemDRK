@@ -22,7 +22,7 @@ export function AdminScreen(props: { onBack: () => void }) {
         <button
           type="button"
           onClick={props.onBack}
-          className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-2 font-semibold text-cyan-50 hover:bg-cyan-500/20"
+          className="rounded-xl border-2 border-[#FFD700]/50 bg-black px-5 py-2 font-bold text-[#FFD700] hover:bg-neutral-950"
         >
           Zur Kasse
         </button>
@@ -377,7 +377,7 @@ function SettingsPanel() {
         className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
         value={org?.value ?? ''}
         onChange={(e) =>
-          void setSetting('orgName', e.target.value || 'DRK')
+          void setSetting('orgName', e.target.value || 'DLRG')
         }
       />
       <label className="text-sm text-slate-400">Bon‑Fußzeile</label>

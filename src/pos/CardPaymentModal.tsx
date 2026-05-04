@@ -14,44 +14,44 @@ export function CardPaymentModal(props: {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 p-4 backdrop-blur-sm sm:items-center"
       role="dialog"
       aria-modal
       aria-labelledby="card-title"
     >
-      <div className="panel-glass max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl p-6 shadow-[0_0_60px_rgba(34,211,238,0.15)]">
-        <h2 id="card-title" className="text-xl font-bold text-white">
+      <div className="panel-dlrg max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-[#ff003c]/40 p-6 shadow-[0_0_60px_rgba(255,0,60,0.2)]">
+        <h2 id="card-title" className="text-xl font-black text-[#FFD700]">
           Kartenzahlung (SumUp / App)
         </h2>
-        <p className="mt-2 text-sm text-slate-400">
+        <p className="mt-2 text-sm font-semibold text-neutral-400">
           Eine direkte Schnittstellen-Anbindung ist im Browser meist nicht
           verfügbar. Bitte Betrag in SumUp (oder vergleichbare App) eingeben und
           Zahlung am Kartenterminal durchführen.
         </p>
-        <div className="mt-6 rounded-2xl border border-violet-500/30 bg-violet-500/10 px-4 py-5 text-center">
-          <div className="text-sm uppercase tracking-wider text-violet-200/80">
+        <div className="mt-6 rounded-2xl border-2 border-[#FFD700]/50 bg-black/60 px-4 py-5 text-center shadow-[0_0_24px_rgba(255,215,0,0.12)]">
+          <div className="text-sm font-bold uppercase tracking-wider text-neutral-400">
             Zu zahlen
           </div>
-          <div className="mt-1 text-4xl font-bold text-white">
+          <div className="mt-1 text-4xl font-black text-[#FFD700]">
             {formatMoney(props.totalCents)}
           </div>
         </div>
         {note?.value != null && note.value !== '' && (
-          <p className="mt-4 rounded-xl border border-white/10 bg-black/20 p-3 text-sm text-slate-300">
+          <p className="mt-4 rounded-xl border border-white/10 bg-black/40 p-3 text-sm text-neutral-300">
             {note.value}
           </p>
         )}
         <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
           <button
             type="button"
-            className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 font-semibold text-slate-100 hover:bg-white/10"
+            className="rounded-xl border border-neutral-600 bg-neutral-900 px-4 py-3 font-bold text-neutral-200 hover:border-[#FFD700]/40"
             onClick={props.onCancel}
           >
             Abbrechen
           </button>
           <button
             type="button"
-            className="rounded-xl bg-gradient-to-r from-violet-600 to-fuchsia-600 px-4 py-3 font-bold text-white shadow-[0_0_28px_rgba(139,92,246,0.35)] hover:brightness-110"
+            className="rounded-xl border-2 border-[#ff003c] bg-red-950/40 px-4 py-3 font-black text-white shadow-[0_0_24px_rgba(255,0,60,0.25)] hover:bg-red-950/60"
             onClick={() => void props.onConfirmSuccess()}
           >
             Kartenzahlung erfolgreich

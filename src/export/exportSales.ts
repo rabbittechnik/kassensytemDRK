@@ -57,8 +57,8 @@ export async function exportSalesCsv(dayKey?: string): Promise<void> {
   const out = [lines.join('\n'), '', detailHeader, ...detailLines].join('\n')
   const blob = new Blob([out], { type: 'text/csv;charset=utf-8' })
   const name = dayKey
-    ? `drk-verkaeufe-${dayKey}.csv`
-    : `drk-verkaeufe-${format(new Date(), 'yyyyMMdd-HHmm')}.csv`
+    ? `dlrg-verkaeufe-${dayKey}.csv`
+    : `dlrg-verkaeufe-${format(new Date(), 'yyyyMMdd-HHmm')}.csv`
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -87,7 +87,7 @@ export async function exportDayReportPdf(dayKey: string): Promise<void> {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' })
   let y = 20
   doc.setFontSize(16)
-  doc.text('DRK – Tagesübersicht', 20, y)
+  doc.text('DLRG – Tagesübersicht', 20, y)
   y += 10
   doc.setFontSize(11)
   doc.text(`Tag: ${dayKey}`, 20, y)
@@ -111,5 +111,5 @@ export async function exportDayReportPdf(dayKey: string): Promise<void> {
     }
   }
 
-  doc.save(`drk-tagesbericht-${dayKey}.pdf`)
+  doc.save(`dlrg-tagesbericht-${dayKey}.pdf`)
 }

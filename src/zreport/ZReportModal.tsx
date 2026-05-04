@@ -52,7 +52,7 @@ export function ZReportModal(props: { onClose: () => void }) {
       role="dialog"
       aria-modal
     >
-      <div className="panel-glass max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl p-6 shadow-[0_0_60px_rgba(59,130,246,0.2)]">
+      <div className="panel-dlrg max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl p-6 shadow-[0_0_40px_rgba(255,0,60,0.15)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 className="text-2xl font-bold text-white">Tages­abschluss</h2>
