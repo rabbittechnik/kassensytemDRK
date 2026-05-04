@@ -1,0 +1,79 @@
+import { sha256Hex } from '../lib/pin'
+import { db } from './database'
+
+const CAT_IDS = {
+  drinks: 'cat-getraenke',
+  food: 'cat-essen',
+  cake: 'cat-kuchen',
+} as const
+
+const defaultCategories = [
+  { id: CAT_IDS.drinks, name: 'Getränke', sortOrder: 10 },
+  { id: CAT_IDS.food, name: 'Essen', sortOrder: 20 },
+  { id: CAT_IDS.cake, name: 'Kuchen', sortOrder: 30 },
+]
+
+function defaultProducts(): {
+  id: string
+  categoryId: string
+  name: string
+  priceCents: number
+  sortOrder: number
+}[] {
+  let o = 0
+  const p = (
+    id: string,
+    categoryId: string,
+    name: string,
+    priceCents: number,
+  ) => ({ id, categoryId, name, priceCents, sortOrder: o++ })
+  return [
+    p('p-wasser', CAT_IDS.drinks, 'Wasser', 150),
+    p('p-cola', CAT_IDS.drinks, 'Cola', 250),
+    p('p-fanta', CAT_IDS.drinks, 'Fanta', 250),
+    p('p-spezi', CAT_IDS.drinks, 'Spezi', 250),
+    p('p-kaffee', CAT_IDS.drinks, 'Kaffee', 200),
+    p('p-tee', CAT_IDS.drinks, 'Tee', 200),
+    p('p-rote', CAT_IDS.food, 'Rote Wurst', 350),
+    p('p-curry', CAT_IDS.food, 'Currywurst', 450),
+    p('p-pommes', CAT_IDS.food, 'Pommes', 300),
+    p('p-broetchen', CAT_IDS.food, 'Brötchen', 180),
+    p('p-veg', CAT_IDS.food, 'Vegetarisches Gericht', 500),
+    p('p-kuchenstueck', CAT_IDS.cake, 'Kuchenstück', 250),
+    p('p-torte', CAT_IDS.cake, 'Torte', 350),
+    p('p-muffin', CAT_IDS.cake, 'Muffin', 200),
+    p('p-kk', CAT_IDS.cake, 'Kaffee + Kuchen Kombi', 400),
+  ]
+}
+
+export async function ensureSeed(): Promise<void> {
+  const n = await db.categories.count()
+  if (n === 0) {
+    await db.transaction('rw', db.categories, db.products, db.settings, async () => {
+      for (const c of defaultCategories) {
+        await db.categories.add(c)
+      }
+      for (const row of defaultProducts()) {
+        await db.products.add({
+          ...row,
+          active: true,
+        })
+      }
+      const hash = await sha256Hex('1234')
+      await db.settings.bulkPut([
+        { key: 'seedVersion', value: '1' },
+        { key: 'orgName', value: 'DRK' },
+        { key: 'receiptFooter', value: 'Vielen Dank für Ihren Einkauf' },
+        { key: 'nextReceiptNo', value: '1' },
+        { key: 'adminPinHash', value: hash },
+        { key: 'sumupNote', value: 'Betrag in SumUp / SIM-App eingeben und Kartenzahlung am Gerät durchführen.' },
+      ])
+    })
+  } else {
+    const hasPin = await db.settings.get('adminPinHash')
+    if (!hasPin) {
+      const hash = await sha256Hex('1234')
+      await db.settings.put({ key: 'adminPinHash', value: hash })
+    }
+  }
+}

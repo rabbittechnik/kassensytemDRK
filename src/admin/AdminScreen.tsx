@@ -1,0 +1,422 @@
+import { useLiveQuery } from 'dexie-react-hooks'
+import { useCallback, useState } from 'react'
+import { db } from '../db/database'
+import { setSetting } from '../db/sales'
+import { sha256Hex } from '../lib/pin'
+import { formatMoney } from '../lib/format'
+import { exportSalesCsv } from '../export/exportSales'
+import type { CategoryRow, ProductRow } from '../types'
+
+const tabs = ['Artikel', 'Kategorien', 'Export', 'Einstellungen'] as const
+
+export function AdminScreen(props: { onBack: () => void }) {
+  const [tab, setTab] = useState<(typeof tabs)[number]>('Artikel')
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-3 p-3 md:p-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Admin</h1>
+          <p className="text-sm text-slate-400">Artikel · Kategorien · Export</p>
+        </div>
+        <button
+          type="button"
+          onClick={props.onBack}
+          className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-2 font-semibold text-cyan-50 hover:bg-cyan-500/20"
+        >
+          Zur Kasse
+        </button>
+      </header>
+
+      <nav className="flex flex-wrap gap-2">
+        {tabs.map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={[
+              'rounded-xl px-4 py-2 text-sm font-semibold transition',
+              tab === t
+                ? 'border border-cyan-400/60 bg-cyan-500/15 text-cyan-50'
+                : 'border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10',
+            ].join(' ')}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      <div className="panel-glass min-h-0 flex-1 overflow-y-auto rounded-2xl p-4">
+        {tab === 'Artikel' && <ProductsAdmin />}
+        {tab === 'Kategorien' && <CategoriesAdmin />}
+        {tab === 'Export' && <ExportPanel />}
+        {tab === 'Einstellungen' && <SettingsPanel />}
+      </div>
+    </div>
+  )
+}
+
+function ProductsAdmin() {
+  const categories = useLiveQuery(
+    () => db.categories.orderBy('sortOrder').toArray(),
+    [],
+  )
+  const products = useLiveQuery(() => db.products.orderBy('sortOrder').toArray(), [])
+  const [editing, setEditing] = useState<ProductRow | 'new' | null>(null)
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-white">Artikel</h2>
+        <button
+          type="button"
+          className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 font-semibold text-white"
+          onClick={() => setEditing('new')}
+        >
+          Neuer Artikel
+        </button>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[640px] text-left text-sm">
+          <thead>
+            <tr className="border-b border-white/10 text-slate-400">
+              <th className="py-2 pr-3">Name</th>
+              <th className="py-2 pr-3">Kategorie</th>
+              <th className="py-2 pr-3">Preis</th>
+              <th className="py-2 pr-3">Aktiv</th>
+              <th className="py-2">Aktion</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(products ?? []).map((p) => {
+              const cname =
+                categories?.find((c) => c.id === p.categoryId)?.name ?? '—'
+              return (
+                <tr
+                  key={p.id}
+                  className="border-b border-white/5 hover:bg-white/[0.03]"
+                >
+                  <td className="py-2 pr-3 font-medium text-slate-100">
+                    {p.name}
+                  </td>
+                  <td className="py-2 pr-3 text-slate-300">{cname}</td>
+                  <td className="py-2 pr-3 tabular-nums text-cyan-100">
+                    {formatMoney(p.priceCents)}
+                  </td>
+                  <td className="py-2 pr-3">{p.active ? 'Ja' : 'Nein'}</td>
+                  <td className="py-2">
+                    <button
+                      type="button"
+                      className="text-sm text-blue-300 hover:underline"
+                      onClick={() => setEditing(p)}
+                    >
+                      Bearbeiten
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {editing && (
+        <ProductEditor
+          key={editing === 'new' ? 'new' : editing.id}
+          mode={editing}
+          categories={categories ?? []}
+          onClose={() => setEditing(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function ProductEditor(props: {
+  mode: ProductRow | 'new'
+  categories: CategoryRow[]
+  onClose: () => void
+}) {
+  const { onClose, categories: catList, mode } = props
+  const isNew = mode === 'new'
+  const existing: ProductRow | undefined =
+    mode === 'new' ? undefined : mode
+  const [name, setName] = useState(existing?.name ?? '')
+  const [priceStr, setPriceStr] = useState(
+    existing
+      ? (existing.priceCents / 100).toFixed(2).replace('.', ',')
+      : '1,00',
+  )
+  const [categoryId, setCategoryId] = useState(
+    existing?.categoryId ?? catList[0]?.id ?? '',
+  )
+  const [active, setActive] = useState(existing?.active ?? true)
+
+  const save = useCallback(async () => {
+    const euros = parseFloat(priceStr.replace(',', '.'))
+    if (!name.trim() || Number.isNaN(euros) || !categoryId) return
+    const priceCents = Math.round(euros * 100)
+    if (isNew) {
+      const max =
+        (await db.products.orderBy('sortOrder').last())?.sortOrder ?? 0
+      await db.products.add({
+        id: crypto.randomUUID(),
+        name: name.trim(),
+        categoryId,
+        priceCents,
+        active,
+        sortOrder: max + 10,
+      })
+    } else if (existing) {
+      await db.products.update(existing.id, {
+        name: name.trim(),
+        categoryId,
+        priceCents,
+        active,
+      })
+    }
+    onClose()
+  }, [active, categoryId, existing, isNew, name, priceStr, onClose])
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
+      <div className="panel-glass w-full max-w-md rounded-2xl p-6">
+        <h3 className="text-lg font-bold text-white">
+          {isNew ? 'Neuer Artikel' : 'Artikel bearbeiten'}
+        </h3>
+        <label className="mt-4 block text-sm text-slate-400">Name</label>
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <label className="mt-3 block text-sm text-slate-400">Preis (EUR)</label>
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+          inputMode="decimal"
+          value={priceStr}
+          onChange={(e) => setPriceStr(e.target.value)}
+        />
+        <label className="mt-3 block text-sm text-slate-400">Kategorie</label>
+        <select
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-3 text-white"
+          value={categoryId}
+          onChange={(e) => setCategoryId(e.target.value)}
+        >
+          {catList.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        <label className="mt-4 flex items-center gap-2 text-slate-200">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(e) => setActive(e.target.checked)}
+          />
+          Im Verkauf sichtbar
+        </label>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-xl border border-white/15 px-4 py-2 text-slate-200"
+            onClick={onClose}
+          >
+            Abbrechen
+          </button>
+          {!isNew && existing && (
+            <button
+              type="button"
+              className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-rose-100"
+              onClick={async () => {
+                if (confirm('Artikel wirklich löschen?')) {
+                  await db.products.delete(existing.id)
+                  onClose()
+                }
+              }}
+            >
+              Löschen
+            </button>
+          )}
+          <button
+            type="button"
+            className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2 font-semibold text-white"
+            onClick={() => void save()}
+          >
+            Speichern
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function CategoriesAdmin() {
+  const categories = useLiveQuery(
+    () => db.categories.orderBy('sortOrder').toArray(),
+    [],
+  )
+
+  const add = useCallback(async () => {
+    const name = window.prompt('Name der Kategorie?')
+    if (!name?.trim()) return
+    const last = await db.categories.orderBy('sortOrder').last()
+    const max = last?.sortOrder ?? 0
+    await db.categories.add({
+      id: crypto.randomUUID(),
+      name: name.trim(),
+      sortOrder: max + 10,
+    })
+  }, [])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-lg font-semibold text-white">Kategorien</h2>
+        <button
+          type="button"
+          className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/15"
+          onClick={() => void add()}
+        >
+          Neue Kategorie
+        </button>
+      </div>
+      <ul className="space-y-2">
+        {(categories ?? []).map((c) => (
+          <li
+            key={c.id}
+            className="flex items-center justify-between rounded-xl border border-white/10 bg-black/20 px-4 py-3"
+          >
+            <span className="font-medium text-slate-100">{c.name}</span>
+            <button
+              type="button"
+              className="text-sm text-rose-300 hover:underline"
+              onClick={async () => {
+                const cnt = await db.products
+                  .where('categoryId')
+                  .equals(c.id)
+                  .count()
+                if (cnt > 0) {
+                  alert(
+                    `Kategorie enthält noch ${cnt} Artikel – bitte zuerst verschieben oder löschen.`,
+                  )
+                  return
+                }
+                if (confirm('Kategorie löschen?')) await db.categories.delete(c.id)
+              }}
+            >
+              Löschen
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function ExportPanel() {
+  return (
+    <div className="space-y-4">
+      <h2 className="text-lg font-semibold text-white">
+        Export · Verkaufsübersicht
+      </h2>
+      <p className="text-sm text-slate-400">
+        Alle gespeicherten Verkäufe werden als CSV exportiert (Kopfzeilen +
+        Positionen). Für einen einzelnen Tag nutzen Sie den Tagesabschluss auf
+        der Kasse.
+      </p>
+      <button
+        type="button"
+        className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-3 font-semibold text-white"
+        onClick={() => void exportSalesCsv()}
+      >
+        Gesamter Export (CSV)
+      </button>
+    </div>
+  )
+}
+
+function SettingsPanel() {
+  const org = useLiveQuery(
+    () => db.settings.where('key').equals('orgName').first(),
+    [],
+  )
+  const footer = useLiveQuery(
+    () => db.settings.where('key').equals('receiptFooter').first(),
+    [],
+  )
+  const sumup = useLiveQuery(
+    () => db.settings.where('key').equals('sumupNote').first(),
+    [],
+  )
+
+  const [pin1, setPin1] = useState('')
+  const [pin2, setPin2] = useState('')
+
+  const savePin = useCallback(async () => {
+    if (pin1.length >= 4 && pin1 === pin2) {
+      const h = await sha256Hex(pin1)
+      await setSetting('adminPinHash', h)
+      setPin1('')
+      setPin2('')
+      alert('PIN wurde geändert.')
+    } else if (pin1 || pin2) {
+      alert('PIN: mindestens 4 Zeichen und beide Felder gleich.')
+    }
+  }, [pin1, pin2])
+
+  return (
+    <div className="mx-auto max-w-xl space-y-4">
+      <h2 className="text-lg font-semibold text-white">Einstellungen</h2>
+      <p className="text-xs text-slate-500">
+        Textfelder werden bei Eingabe direkt gespeichert (IndexedDB).
+      </p>
+      <label className="text-sm text-slate-400">Anzeigename / Organisation</label>
+      <input
+        className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+        value={org?.value ?? ''}
+        onChange={(e) =>
+          void setSetting('orgName', e.target.value || 'DRK')
+        }
+      />
+      <label className="text-sm text-slate-400">Bon‑Fußzeile</label>
+      <input
+        className="w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+        value={footer?.value ?? ''}
+        onChange={(e) => void setSetting('receiptFooter', e.target.value)}
+      />
+      <label className="text-sm text-slate-400">Hinweis Kartenzahlung / SumUp</label>
+      <textarea
+        className="min-h-[88px] w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+        value={sumup?.value ?? ''}
+        onChange={(e) => void setSetting('sumupNote', e.target.value)}
+      />
+      <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4">
+        <h3 className="font-semibold text-rose-100">Admin‑PIN ändern</h3>
+        <p className="mt-1 text-xs text-rose-200/70">Standard bei Erststart: 1234</p>
+        <input
+          type="password"
+          placeholder="Neue PIN"
+          className="mt-3 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+          value={pin1}
+          onChange={(e) => setPin1(e.target.value)}
+        />
+        <input
+          type="password"
+          placeholder="PIN wiederholen"
+          className="mt-2 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
+          value={pin2}
+          onChange={(e) => setPin2(e.target.value)}
+        />
+      </div>
+      <button
+        type="button"
+        className="w-full rounded-xl bg-gradient-to-r from-rose-600 to-orange-500 py-3 font-semibold text-white"
+        onClick={() => void savePin()}
+      >
+        PIN speichern
+      </button>
+    </div>
+  )
+}
