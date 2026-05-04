@@ -33,6 +33,7 @@ export function InvoiceSaleModal(props: {
   onConfirmed: (p: {
     teamId: string
     eventId: string
+    eventName: string
     contactName?: string
     note?: string
     teamName: string
@@ -164,6 +165,10 @@ export function InvoiceSaleModal(props: {
 
 
   const selectedTeam = useMemo(() => teams.find((t) => t.id === teamId), [teamId, teams])
+  const selectedEvent = useMemo(
+    () => events.find((e) => e.id === eventId),
+    [eventId, events],
+  )
 
   async function createTeamAndSelect() {
     const name = newName.trim()
@@ -285,6 +290,7 @@ export function InvoiceSaleModal(props: {
       await onConfirmed({
         teamId,
         eventId,
+        eventName: (selectedEvent?.name ?? '').trim(),
         contactName: contact.trim() || undefined,
         note: note.trim() || undefined,
         teamName: (selectedTeam?.name ?? '').trim(),

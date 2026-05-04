@@ -48,6 +48,27 @@ export interface DemoSale {
   customerReceiptText: string
   servingReceiptText: string
   teamName?: string
+  /** Rechnungsverkauf: Team-/Event-Zuordnung fuer Demo-Open-Posts */
+  teamId?: string
+  eventId?: string
+  eventName?: string
+  contactName?: string
+  note?: string
+  /** Nach Demo-Sammelrechnung: Verkauf gilt als abgerechnet */
+  demoInvoiceAllocationId?: string
+}
+
+/** Simulierte Sammelrechnung (nur Demo, in-memory). */
+export interface DemoInvoice {
+  id: string
+  invoice_no: string
+  total_cents: number
+  created_at: number
+  teamId: string
+  eventId: string
+  teamName: string
+  eventName: string
+  derivedStatus: string
 }
 
 interface DemoState {
@@ -55,7 +76,9 @@ interface DemoState {
   enteredAt: number | null
   demoTeams: DemoTeam[]
   demoSales: DemoSale[]
+  demoInvoices: DemoInvoice[]
   nextNo: number
+  nextInvoiceSeq: number
 }
 
 const initialState: DemoState = {
@@ -63,7 +86,9 @@ const initialState: DemoState = {
   enteredAt: null,
   demoTeams: [],
   demoSales: [],
+  demoInvoices: [],
   nextNo: 1,
+  nextInvoiceSeq: 1,
 }
 
 let state: DemoState = initialState
@@ -115,7 +140,9 @@ export function enterDemoMode(code: string): boolean {
     enteredAt: Date.now(),
     demoTeams: freshDemoTeams(),
     demoSales: [],
+    demoInvoices: [],
     nextNo: 1,
+    nextInvoiceSeq: 1,
   })
   return true
 }
@@ -126,7 +153,9 @@ export function exitDemoMode(): void {
     enteredAt: null,
     demoTeams: [],
     demoSales: [],
+    demoInvoices: [],
     nextNo: 1,
+    nextInvoiceSeq: 1,
   })
 }
 
@@ -138,6 +167,110 @@ export function nextDemoReceiptNo(): { n: number; label: string } {
 
 export function addDemoSale(sale: DemoSale): void {
   setState({ demoSales: [...state.demoSales, sale] })
+}
+
+/** Offene Posten-Zeilen fuer TeamsBilling (API-Form). */
+export function buildDemoOpenPostRows(
+  sales: DemoSale[],
+  teams: DemoTeam[],
+): Record<string, unknown>[] {
+  const pending = sales.filter(
+    (s) =>
+      s.paymentMethod === 'invoice' &&
+      s.teamId &&
+      s.eventId &&
+      !s.demoInvoiceAllocationId,
+  )
+  const byKey = new Map<
+    string,
+    { teamId: string; eventId: string; sales: DemoSale[] }
+  >()
+  for (const s of pending) {
+    const teamId = s.teamId!
+    const eventId = s.eventId!
+    const key = `${teamId}|${eventId}`
+    let g = byKey.get(key)
+    if (!g) {
+      g = { teamId, eventId, sales: [] }
+      byKey.set(key, g)
+    }
+    g.sales.push(s)
+  }
+  const teamLabel = (id: string) => teams.find((t) => t.id === id)?.name ?? 'Team'
+  const rows: Record<string, unknown>[] = []
+  for (const { teamId, eventId, sales: grp } of byKey.values()) {
+    const cents = grp.reduce((a, s) => a + s.totalCents, 0)
+    const times = grp.map((s) => s.createdAt)
+    const eventName = grp[0]?.eventName ?? '—'
+    rows.push({
+      teamId,
+      eventId,
+      team_name: teamLabel(teamId),
+      event_name: eventName,
+      open_count: grp.length,
+      total_open_cents: cents,
+      firstPurchaseAt: Math.min(...times),
+      lastPurchaseAt: Math.max(...times),
+    })
+  }
+  rows.sort((a, b) =>
+    String(a.team_name).localeCompare(String(b.team_name), 'de'),
+  )
+  return rows
+}
+
+/**
+ * Demo-Sammelrechnung: bucht offene Demo-Rechnungsverkaeufe auf eine
+ * simulierte Rechnung (in-memory).
+ */
+export function createDemoCollectiveInvoice(teamId: string, eventId: string): DemoInvoice | null {
+  const pending = state.demoSales.filter(
+    (s) =>
+      s.paymentMethod === 'invoice' &&
+      s.teamId === teamId &&
+      s.eventId === eventId &&
+      !s.demoInvoiceAllocationId,
+  )
+  if (pending.length === 0) return null
+  const invId = `demo-inv-${crypto.randomUUID()}`
+  const seq = state.nextInvoiceSeq
+  const invoiceNo = `DEMO-RE-${String(seq).padStart(4, '0')}`
+  const total = pending.reduce((a, s) => a + s.totalCents, 0)
+  const teamName =
+    state.demoTeams.find((t) => t.id === teamId)?.name ?? pending[0]?.teamName ?? 'Team'
+  const eventName = pending[0]?.eventName ?? '—'
+  const inv: DemoInvoice = {
+    id: invId,
+    invoice_no: invoiceNo,
+    total_cents: total,
+    created_at: Date.now(),
+    teamId,
+    eventId,
+    teamName,
+    eventName,
+    derivedStatus: 'OPEN',
+  }
+  setState({
+    demoInvoices: [...state.demoInvoices, inv],
+    nextInvoiceSeq: seq + 1,
+    demoSales: state.demoSales.map((s) =>
+      pending.some((p) => p.id === s.id)
+        ? { ...s, demoInvoiceAllocationId: invId }
+        : s,
+    ),
+  })
+  return inv
+}
+
+export function updateDemoInvoice(
+  id: string,
+  patch: Partial<Pick<DemoInvoice, 'derivedStatus'>>,
+): void {
+  setState({
+    demoInvoices: state.demoInvoices.map((i) =>
+      i.id === id ? { ...i, ...patch } : i,
+    ),
+  })
 }
 
 export function addDemoTeam(input: Omit<DemoTeam, 'id' | 'isDemo'>): DemoTeam {
@@ -187,6 +320,14 @@ export function useDemoSales(): DemoSale[] {
     subscribeDemo,
     () => state.demoSales,
     () => initialState.demoSales,
+  )
+}
+
+export function useDemoInvoices(): DemoInvoice[] {
+  return useSyncExternalStore(
+    subscribeDemo,
+    () => state.demoInvoices,
+    () => initialState.demoInvoices,
   )
 }
 

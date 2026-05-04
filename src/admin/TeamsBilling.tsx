@@ -1,10 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { jsPDF } from 'jspdf'
 import { apiBlob, apiJson } from '../api/http'
 import { getStoredRole, getStoredToken } from '../api/config'
 import { formatDateTime, formatMoney } from '../lib/format'
 import { parseEurosToCents } from '../lib/euroParse'
 import { TeamsManagement } from './TeamsManagement'
-import { useDemoMode } from '../demo/demoStore'
+import {
+  buildDemoOpenPostRows,
+  createDemoCollectiveInvoice,
+  updateDemoInvoice,
+  useDemoInvoices,
+  useDemoMode,
+  useDemoSales,
+  useDemoTeams,
+} from '../demo/demoStore'
 
 type ApiRow = Record<string, unknown>
 
@@ -49,8 +58,12 @@ function saveBlob(blob: Blob, fn: string) {
 
 export function TeamsBilling() {
   const demoMode = useDemoMode()
+  const demoSales = useDemoSales()
+  const demoTeams = useDemoTeams()
+  const demoInvoices = useDemoInvoices()
   const [authRev, setAuthRev] = useState(0)
   const admin = Boolean(getStoredToken()) && getStoredRole() === 'admin'
+  const allowBillingAdmin = admin || demoMode
 
   const [evtOpen, setEvtOpen] = useState('')
 
@@ -118,12 +131,59 @@ export function TeamsBilling() {
 
 
   const load = useCallback(async () => {
-    // DEMO-Modus: keine echten Rechnungs-/Open-Post-Daten anzeigen.
     if (demoMode) {
-      setOpenRows([])
-      setInvRows([])
-      setEvents([])
+      setBusy(true)
       setInfo(null)
+      try {
+        let opens = buildDemoOpenPostRows(demoSales, demoTeams)
+        if (evtOpen.trim()) {
+          const eid = evtOpen.trim()
+          opens = opens.filter((r) => String(r.eventId) === eid)
+        }
+        setOpenRows(opens)
+
+        let invs: ApiRow[] = demoInvoices.map((inv) => ({
+          id: inv.id,
+          invoice_no: inv.invoice_no,
+          total_cents: inv.total_cents,
+          created_at: inv.created_at,
+          derivedStatus: inv.derivedStatus,
+        }))
+        if (invStatus.trim()) {
+          const q = invStatus.trim().toLowerCase()
+          invs = invs.filter((r) =>
+            String(r.derivedStatus ?? '')
+              .toLowerCase()
+              .includes(q),
+          )
+        }
+        if (invNo.trim()) {
+          const q = invNo.trim().toLowerCase()
+          invs = invs.filter((r) =>
+            String(r.invoice_no ?? '')
+              .toLowerCase()
+              .includes(q),
+          )
+        }
+        setInvRows(invs)
+
+        const eventIdSet = new Set<string>(['demo-event'])
+        for (const s of demoSales) {
+          if (s.eventId) eventIdSet.add(s.eventId)
+        }
+        const evRows: ApiRow[] = []
+        for (const eid of eventIdSet) {
+          const name =
+            eid === 'demo-event'
+              ? 'DEMO-Veranstaltung'
+              : demoSales.find((s) => s.eventId === eid)?.eventName ?? eid
+          evRows.push({ id: eid, name, status: 'active' })
+        }
+        evRows.sort((a, b) => String(a.name).localeCompare(String(b.name), 'de'))
+        setEvents(evRows)
+      } finally {
+        setBusy(false)
+      }
       return
     }
 
@@ -219,7 +279,16 @@ export function TeamsBilling() {
     }
 
 
-  }, [evtOpen, invNo, invStatus, authRev, demoMode])
+  }, [
+    evtOpen,
+    invNo,
+    invStatus,
+    authRev,
+    demoMode,
+    demoSales,
+    demoTeams,
+    demoInvoices,
+  ])
 
   useEffect(() => {
     const fn = () => setAuthRev((x) => x + 1)
@@ -236,22 +305,50 @@ export function TeamsBilling() {
 
 
   async function openDetail(teamId: string, eventId: string) {
-
-
     setDetailPick({ tid: teamId, eid: eventId })
 
+    if (demoMode) {
+      const rows = demoSales.filter(
+        (s) =>
+          s.paymentMethod === 'invoice' &&
+          s.teamId === teamId &&
+          s.eventId === eventId &&
+          !s.demoInvoiceAllocationId,
+      )
+      setDetailJson(
+        JSON.stringify(
+          rows.map((s) => ({
+            bonNumber: s.bonNumberLabel,
+            createdAt: s.createdAt,
+            totalCents: s.totalCents,
+            lines: s.lines,
+            contactName: s.contactName,
+            note: s.note,
+          })),
+          null,
+          2,
+        ),
+      )
+      return
+    }
 
     const rows = await apiJson(`/teams/${teamId}/open-sales?eventId=${eventId}`)
     setDetailJson(JSON.stringify(rows, null, 2))
-
-
   }
 
 
 
   async function collective(teamId: string, eventId: string) {
     if (demoMode) {
-      setInfo('DEMO – Sammelrechnung wird nicht erstellt.')
+      const inv = createDemoCollectiveInvoice(teamId, eventId)
+      if (!inv) {
+        setInfo('DEMO: Keine offenen Rechnungsverkäufe für dieses Team / diese Veranstaltung.')
+        return
+      }
+      setInfo(
+        `DEMO: Sammelrechnung ${inv.invoice_no} erstellt (${formatMoney(inv.total_cents)}).`,
+      )
+      await load()
       return
     }
 
@@ -308,10 +405,25 @@ export function TeamsBilling() {
 
   async function dlPdf(invId: string, no: string) {
     if (demoMode) {
-      setInfo('DEMO – kein PDF-Download.')
+      const inv = demoInvoices.find((i) => i.id === invId)
+      if (!inv) {
+        setInfo('DEMO: Rechnung nicht gefunden.')
+        return
+      }
+      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
+      doc.setFontSize(16)
+      doc.text('DLRG Kasse – DEMO-Rechnung', 20, 24)
+      doc.setFontSize(11)
+      doc.text(`Nr. ${no}`, 20, 34)
+      doc.text(`Team: ${inv.teamName}`, 20, 42)
+      doc.text(`Veranstaltung: ${inv.eventName}`, 20, 49)
+      doc.text(`Betrag: ${formatMoney(inv.total_cents)}`, 20, 56)
+      doc.text('Hinweis: Nur Simulation, keine steuerliche Relevanz.', 20, 68)
+      const safeNo = no.replace(/[^a-zA-Z0-9_-]/g, '_')
+      doc.save(`demo-rechnung-${safeNo}.pdf`)
+      setInfo('DEMO: PDF heruntergeladen.')
       return
     }
-
 
     const blob = await apiBlob(`/invoices/${invId}/pdf`)
 
@@ -325,16 +437,14 @@ export function TeamsBilling() {
 
   async function mail(invId: string) {
     if (demoMode) {
-      setInfo('DEMO – kein Mail-Versand.')
+      const inv = demoInvoices.find((i) => i.id === invId)
+      const team = inv ? demoTeams.find((t) => t.id === inv.teamId) : undefined
+      const email = team?.invoiceEmail?.trim() || '—'
+      setInfo(`DEMO: E-Mail würde an ${email} gesendet (kein SMTP).`)
       return
     }
 
-
-    if (!admin)
-
-
-
-      return
+    if (!admin) return
 
 
 
@@ -365,12 +475,14 @@ export function TeamsBilling() {
 
   async function payGo() {
     if (demoMode) {
+      if (!payInv) return
+      updateDemoInvoice(payInv, { derivedStatus: 'PAID' })
       setPayInv(null)
       setPayEu('')
-      setInfo('DEMO – Zahlung wird nicht verbucht.')
+      setInfo('DEMO: Zahlung als verbucht markiert.')
+      await load()
       return
     }
-
 
     if (!payInv)
 
@@ -430,17 +542,16 @@ export function TeamsBilling() {
 
   async function stGo() {
     if (demoMode) {
+      if (!stInv || !stWhy.trim()) return
+      updateDemoInvoice(stInv, { derivedStatus: 'STORNO' })
       setStInv(null)
       setStWhy('')
-      setInfo('DEMO – Storno wird nicht erzeugt.')
+      setInfo('DEMO: Rechnung als storniert markiert.')
+      await load()
       return
     }
 
-
-    if (!admin || !stInv || !stWhy.trim())
-
-
-      return
+    if (!admin || !stInv || !stWhy.trim()) return
 
 
 
@@ -886,7 +997,7 @@ export function TeamsBilling() {
 
 
 
-                        {admin && (
+                        {allowBillingAdmin && (
 
 
 
@@ -1407,7 +1518,7 @@ export function TeamsBilling() {
 
 
 
-                      {admin && (
+                      {allowBillingAdmin && (
 
 
 
@@ -1543,16 +1654,41 @@ export function TeamsBilling() {
                             onClick={async () => {
 
 
+                              if (demoMode) {
+                                const inv = demoInvoices.find((i) => i.id === id)
+                                if (!inv) {
+                                  setInfo('DEMO: Rechnung nicht gefunden.')
+                                  return
+                                }
+                                const lines = demoSales.filter(
+                                  (s) => s.demoInvoiceAllocationId === id,
+                                )
+                                const blob = new Blob(
+                                  [
+                                    JSON.stringify(
+                                      {
+                                        demo: true,
+                                        invoice: inv,
+                                        sales: lines.map((s) => ({
+                                          bon: s.bonNumberLabel,
+                                          totalCents: s.totalCents,
+                                          lines: s.lines,
+                                        })),
+                                      },
+                                      null,
+                                      2,
+                                    ),
+                                  ],
+                                  { type: 'application/json' },
+                                )
+                                saveBlob(blob, `structured-${no}-DEMO.json`)
+                                setInfo('DEMO: Strukturierter Export (JSON) heruntergeladen.')
+                                return
+                              }
+
                               const blob = await apiBlob(
-
-
                                 `/invoices/${id}/structured-export`,
-
-
                               )
-
-
-
 
                               saveBlob(blob, `structured-${no}.json`)
 

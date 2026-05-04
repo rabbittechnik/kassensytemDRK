@@ -329,7 +329,15 @@ export function PosScreen({
     async (
       method: PaymentMethod,
       apiPay?: ApiPaymentBody,
-      opts?: { offlineSkipReceiptPrint?: boolean; teamName?: string },
+      opts?: {
+        offlineSkipReceiptPrint?: boolean
+        teamName?: string
+        teamId?: string
+        eventId?: string
+        eventName?: string
+        contactName?: string
+        note?: string
+      },
     ) => {
       if (cart.length === 0 || total <= 0) return
       const snap = [...cart]
@@ -357,6 +365,11 @@ export function PosScreen({
           const { n: demoNo, label } = nextDemoReceiptNo()
           const createdAt = Date.now()
           const teamName = opts?.teamName
+          const teamId = opts?.teamId
+          const eventId = opts?.eventId
+          const eventName = opts?.eventName
+          const contactName = opts?.contactName
+          const note = opts?.note
           const customer = formatDemoCustomerReceipt({
             bonNumberLabel: label,
             createdAt,
@@ -385,6 +398,11 @@ export function PosScreen({
             customerReceiptText: customer,
             servingReceiptText: serving,
             teamName,
+            teamId,
+            eventId,
+            eventName,
+            contactName,
+            note,
           })
           setCart([])
 
@@ -1092,7 +1110,14 @@ export function PosScreen({
                 contactName: p.contactName,
                 note: p.note,
               },
-              { teamName: p.teamName },
+              {
+                teamName: p.teamName,
+                teamId: p.teamId,
+                eventId: p.eventId,
+                eventName: p.eventName,
+                contactName: p.contactName,
+                note: p.note,
+              },
             )
             setInvoiceOpen(false)
           }}
