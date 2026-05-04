@@ -51,7 +51,12 @@ export function buildEscPosBytes(payload: ReceiptPayload): Uint8Array {
   push(new Uint8Array([ESC, 0x45, 1])) // bold
   push(line([`SUMME ${formatMoney(payload.totalCents)}`]))
   push(new Uint8Array([ESC, 0x45, 0]))
-  const payLabel = payload.payment === 'cash' ? 'Bar' : 'Karte'
+  const payLabel =
+    payload.payment === 'cash'
+      ? 'Bar'
+      : payload.payment === 'invoice'
+        ? 'Auf Rechnung'
+        : 'Karte'
   push(line([`Zahlung: ${payLabel}`]))
   if (payload.footer) {
     push(line(['']))
@@ -84,7 +89,12 @@ export function receiptAsPlainText(payload: ReceiptPayload): string {
     )
   }
   lines.push('', `SUMME ${formatMoney(payload.totalCents)}`)
-  const payLabel = payload.payment === 'cash' ? 'Bar' : 'Karte'
+  const payLabel =
+    payload.payment === 'cash'
+      ? 'Bar'
+      : payload.payment === 'invoice'
+        ? 'Auf Rechnung'
+        : 'Karte'
   lines.push(`Zahlung: ${payLabel}`)
   if (payload.footer) lines.push('', asciiReceipt(payload.footer))
   return lines.join('\n')

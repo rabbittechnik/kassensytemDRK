@@ -1,4 +1,4 @@
-export type PaymentMethod = 'cash' | 'card'
+export type PaymentMethod = 'cash' | 'card' | 'invoice'
 
 export interface CartLine {
   key: string
@@ -21,6 +21,9 @@ export interface ProductRow {
   priceCents: number
   active: boolean
   sortOrder: number
+  stockTracking?: boolean
+  stockQty?: number | null
+  stockMin?: number | null
 }
 
 export interface SaleRow {

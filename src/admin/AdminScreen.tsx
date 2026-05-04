@@ -6,8 +6,15 @@ import { sha256Hex } from '../lib/pin'
 import { formatMoney } from '../lib/format'
 import { exportSalesCsv } from '../export/exportSales'
 import type { CategoryRow, ProductRow } from '../types'
+import { TeamsBilling } from './TeamsBilling'
 
-const tabs = ['Artikel', 'Kategorien', 'Export', 'Einstellungen'] as const
+const tabs = [
+  'Artikel',
+  'Kategorien',
+  'Teams / Rechnungen',
+  'Export',
+  'Einstellungen',
+] as const
 
 export function AdminScreen(props: { onBack: () => void }) {
   const [tab, setTab] = useState<(typeof tabs)[number]>('Artikel')
@@ -17,7 +24,9 @@ export function AdminScreen(props: { onBack: () => void }) {
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Admin</h1>
-          <p className="text-sm text-slate-400">Artikel · Kategorien · Export</p>
+          <p className="text-sm text-slate-400">
+            Artikel · Teams · Export · Einstellungen
+          </p>
         </div>
         <button
           type="button"
@@ -49,6 +58,7 @@ export function AdminScreen(props: { onBack: () => void }) {
       <div className="panel-glass min-h-0 flex-1 overflow-y-auto rounded-2xl p-4">
         {tab === 'Artikel' && <ProductsAdmin />}
         {tab === 'Kategorien' && <CategoriesAdmin />}
+        {tab === 'Teams / Rechnungen' && <TeamsBilling />}
         {tab === 'Export' && <ExportPanel />}
         {tab === 'Einstellungen' && <SettingsPanel />}
       </div>

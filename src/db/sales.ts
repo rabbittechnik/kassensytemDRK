@@ -18,6 +18,12 @@ export async function saveSale(
   lines: CartLine[],
   paymentMethod: PaymentMethod,
 ): Promise<{ saleId: string; receiptNo: number; createdAt: number }> {
+  if (paymentMethod === 'invoice') {
+    throw new Error(
+      'Rechnungsverkäufe erfordern die Server-API (VITE_API_BASE_URL + Anmeldung).',
+    )
+  }
+
   const totalCents = lines.reduce(
     (s, l) => s + l.priceCents * l.qty,
     0,
