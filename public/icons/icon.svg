@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="DLRG Kasse">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="40%" r="75%">
+      <stop offset="0%" stop-color="#1f1622"/>
+      <stop offset="60%" stop-color="#0e0e14"/>
+      <stop offset="100%" stop-color="#050509"/>
+    </radialGradient>
+    <linearGradient id="red" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff4d6a"/>
+      <stop offset="60%" stop-color="#e30613"/>
+      <stop offset="100%" stop-color="#7a000b"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#fff7a8"/>
+      <stop offset="55%" stop-color="#ffd700"/>
+      <stop offset="100%" stop-color="#b58300"/>
+    </linearGradient>
+    <filter id="glow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="10" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Hintergrund (Safe-Area: alle Inhalte innerhalb 410x410 zentriert,
+       fuer Maskable-Ikon ist 80% Inner Safe Area noetig). -->
+  <rect width="512" height="512" rx="96" ry="96" fill="url(#bg)"/>
+
+  <!-- Innerer Rahmen / Akzent -->
+  <rect x="40" y="40" width="432" height="432" rx="72" ry="72"
+        fill="none" stroke="url(#red)" stroke-width="6" opacity="0.55"/>
+
+  <!-- Roter Vertikalakzent links (DLRG Akzent) -->
+  <rect x="64" y="120" width="14" height="272" rx="7" fill="url(#red)" opacity="0.85"/>
+
+  <!-- Welle als angedeutetes Wasser -->
+  <path d="M64 388 C 130 360, 200 416, 280 388 S 430 360, 448 388"
+        fill="none" stroke="url(#red)" stroke-width="10" stroke-linecap="round" opacity="0.65"/>
+  <path d="M64 416 C 130 396, 220 444, 300 416 S 430 396, 448 416"
+        fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="6" stroke-linecap="round"/>
+
+  <!-- Hauptschrift DLRG -->
+  <g filter="url(#glow)" transform="translate(96 196)">
+    <text x="0" y="0"
+          font-family="'Helvetica Neue', Arial, sans-serif"
+          font-weight="900"
+          font-size="158"
+          letter-spacing="6"
+          fill="url(#gold)">DLRG</text>
+  </g>
+
+  <!-- Untertitel KASSE -->
+  <text x="256" y="304"
+        text-anchor="middle"
+        font-family="'Helvetica Neue', Arial, sans-serif"
+        font-weight="800"
+        font-size="56"
+        letter-spacing="22"
+        fill="#ffffff" opacity="0.9">KASSE</text>
+</svg>

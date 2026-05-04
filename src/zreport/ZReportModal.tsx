@@ -3,16 +3,20 @@ import { useMemo } from 'react'
 import { db } from '../db/database'
 import { todayKey, formatMoney } from '../lib/format'
 import { exportDayReportPdf, exportSalesCsv } from '../export/exportSales'
+import { useDemoMode, useDemoSales } from '../demo/demoStore'
+import { exportDemoDayReportPdf, exportDemoSalesCsv } from '../export/exportDemo'
 
 export function ZReportModal(props: { onClose: () => void }) {
+  const demoMode = useDemoMode()
+  const demoSales = useDemoSales()
   const dayKey = useMemo(() => todayKey(), [])
 
-  const salesToday = useLiveQuery(
+  const salesTodayDex = useLiveQuery(
     () => db.sales.where('dayKey').equals(dayKey).toArray(),
     [dayKey],
   )
 
-  const linesToday = useLiveQuery(async () => {
+  const linesTodayDex = useLiveQuery(async () => {
     const sales = await db.sales.where('dayKey').equals(dayKey).toArray()
     const ids = new Set(sales.map((s) => s.id))
     const all = await db.saleLines.toArray()
@@ -24,17 +28,36 @@ export function ZReportModal(props: { onClose: () => void }) {
   const categoryNames = useMemo(() => {
     const m = new Map<string, string>()
     for (const c of categories ?? []) m.set(c.id, c.name)
+    if (demoMode) {
+      for (const s of demoSales) {
+        for (const l of s.lines) {
+          if (!m.has(l.categoryId)) m.set(l.categoryId, l.categoryName)
+        }
+      }
+    }
     return m
-  }, [categories])
+  }, [categories, demoMode, demoSales])
+
+  // Demo-Modus: ausschliesslich Demo-Sales aus dem in-memory Store nutzen.
+  const salesToday = demoMode
+    ? demoSales.filter((s) => s.dayKey === dayKey)
+    : salesTodayDex
 
   const byCategory = useMemo(() => {
     const m = new Map<string, number>()
-    for (const l of linesToday ?? []) {
-      const key = l.categoryId
-      m.set(key, (m.get(key) ?? 0) + l.lineTotalCents)
+    if (demoMode) {
+      for (const s of demoSales.filter((x) => x.dayKey === dayKey)) {
+        for (const l of s.lines) {
+          m.set(l.categoryId, (m.get(l.categoryId) ?? 0) + l.lineTotalCents)
+        }
+      }
+    } else {
+      for (const l of linesTodayDex ?? []) {
+        m.set(l.categoryId, (m.get(l.categoryId) ?? 0) + l.lineTotalCents)
+      }
     }
     return m
-  }, [linesToday])
+  }, [demoMode, demoSales, dayKey, linesTodayDex])
 
   const cashTotal =
     salesToday?.filter((s) => s.paymentMethod === 'cash').reduce((a, s) => a + s.totalCents, 0) ??
@@ -55,8 +78,16 @@ export function ZReportModal(props: { onClose: () => void }) {
       <div className="panel-dlrg max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-2xl p-6 shadow-[0_0_40px_rgba(255,0,60,0.15)]">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h2 className="text-2xl font-bold text-white">Tages­abschluss</h2>
+            <h2 className="text-2xl font-bold text-white">
+              {demoMode ? 'Tagesabschluss (DEMO – simuliert)' : 'Tagesabschluss'}
+            </h2>
             <p className="text-slate-400">Kalendertag {dayKey}</p>
+            {demoMode && (
+              <p className="mt-2 rounded-lg border border-yellow-500/40 bg-yellow-950/25 px-3 py-2 text-xs font-bold text-yellow-200">
+                DEMO-Tagesabschluss – nicht echt gespeichert. Nur Demo-Verkäufe
+                werden ausgewertet.
+              </p>
+            )}
           </div>
           <button
             type="button"
@@ -122,16 +153,24 @@ export function ZReportModal(props: { onClose: () => void }) {
           <button
             type="button"
             className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 font-medium text-slate-100 hover:bg-white/10"
-            onClick={() => void exportSalesCsv(dayKey)}
+            onClick={() =>
+              demoMode
+                ? exportDemoSalesCsv(dayKey, demoSales)
+                : void exportSalesCsv(dayKey)
+            }
           >
-            CSV (Tag)
+            {demoMode ? 'Demo-CSV (Tag)' : 'CSV (Tag)'}
           </button>
           <button
             type="button"
             className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-3 font-semibold text-white shadow-[0_0_24px_rgba(59,130,246,0.3)] hover:brightness-110"
-            onClick={() => void exportDayReportPdf(dayKey)}
+            onClick={() =>
+              demoMode
+                ? exportDemoDayReportPdf(dayKey, demoSales)
+                : void exportDayReportPdf(dayKey)
+            }
           >
-            PDF‑Bericht
+            {demoMode ? 'Demo-PDF (Bericht)' : 'PDF‑Bericht'}
           </button>
         </div>
         <p className="mt-4 text-xs text-slate-500">

@@ -83,6 +83,24 @@ async function migrateDlrgExtras(): Promise<void> {
   }
 }
 
+async function ensureBonSettings(): Promise<void> {
+  const defs: [string, string][] = [
+    ['receiptWidthMm', '58'],
+    ['printCustomerReceipt', '1'],
+    ['printServingReceipt', '1'],
+    [
+      'receiptTagline',
+      'Fuer ECHT. Wenn keiner damit rechnet, sind WIR da.',
+    ],
+    ['registerName', 'Hauptkasse'],
+    ['cashierName', 'Admin'],
+  ]
+  for (const [k, v] of defs) {
+    const ex = await db.settings.get(k)
+    if (!ex) await db.settings.put({ key: k, value: v })
+  }
+}
+
 export async function ensureSeed(): Promise<void> {
   const n = await db.categories.count()
   if (n === 0) {
@@ -114,4 +132,5 @@ export async function ensureSeed(): Promise<void> {
     }
     await migrateDlrgExtras()
   }
+  await ensureBonSettings()
 }

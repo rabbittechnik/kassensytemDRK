@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/http'
 import { formatMoney } from '../lib/format'
 import type { CartLine } from '../types'
+import {
+  addDemoTeam,
+  isDemoMode,
+  useDemoMode,
+  useDemoTeams,
+} from '../demo/demoStore'
 
 type TeamRow = {
   id: string
@@ -25,25 +31,69 @@ export function InvoiceSaleModal(props: {
   totalCents: number
   onCancel: () => void
   onConfirmed: (p: {
-
     teamId: string
-
     eventId: string
-
     contactName?: string
-
     note?: string
+    teamName: string
   }) => void | Promise<void>
 }) {
 
   const { cartLines, totalCents, onCancel, onConfirmed } = props
+  const demoMode = useDemoMode()
+  const demoTeams = useDemoTeams()
 
   const [q, setQ] = useState('')
 
-  const [teams, setTeams] = useState<TeamRow[]>([])
-  const [events, setEvents] = useState<EventRow[]>([])
+  const [apiTeams, setApiTeams] = useState<TeamRow[]>([])
+  const [apiEvents, setApiEvents] = useState<EventRow[]>([])
   const [teamId, setTeamId] = useState('')
   const [eventId, setEventId] = useState('')
+
+  // In Demo: synthetisches Demo-Event und gefilterte Demo-Teams als
+  // derivierte Werte (kein setState im Effekt, kein Cascade-Render).
+  const demoEventList = useMemo<EventRow[]>(() => {
+    if (!demoMode) return []
+    const today = new Date().toISOString().slice(0, 10)
+    return [
+      {
+        id: 'demo-event',
+        name: 'DEMO-Veranstaltung',
+        startDate: today,
+        endDate: today,
+        status: 'active',
+      },
+    ]
+  }, [demoMode])
+
+  const demoTeamList = useMemo<TeamRow[]>(() => {
+    if (!demoMode) return []
+    const search = q.trim().toLowerCase()
+    return demoTeams
+      .filter((t) => t.active)
+      .filter((t) =>
+        search
+          ? `${t.name} ${t.shortName ?? ''}`.toLowerCase().includes(search)
+          : true,
+      )
+      .map<TeamRow>((t) => ({
+        id: t.id,
+        name: t.name,
+        contact_name: t.contactName ?? '',
+        invoice_email: t.invoiceEmail ?? null,
+      }))
+  }, [demoMode, demoTeams, q])
+
+  const teams: TeamRow[] = demoMode ? demoTeamList : apiTeams
+  const events: EventRow[] = demoMode ? demoEventList : apiEvents
+
+  const demoEventAutoSet = useRef(false)
+  useEffect(() => {
+    if (demoMode && !demoEventAutoSet.current && demoEventList.length === 1) {
+      demoEventAutoSet.current = true
+      setEventId(demoEventList[0].id)
+    }
+  }, [demoMode, demoEventList])
   const [contact, setContact] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -75,15 +125,13 @@ export function InvoiceSaleModal(props: {
   }, [onCancel])
 
   useEffect(() => {
+    if (demoMode) return
     let alive = true
     void apiJson<EventRow[]>('/events')
       .then((ev) => {
         if (!alive) return
-
         const act = ev.filter((e) => e.status === 'active')
-
-        setEvents(act)
-
+        setApiEvents(act)
         if (act.length === 1) setEventId(act[0].id)
       })
       .catch(() => {})
@@ -91,38 +139,27 @@ export function InvoiceSaleModal(props: {
     return () => {
       alive = false
     }
-  }, [])
+  }, [demoMode])
 
   useEffect(() => {
-
+    if (demoMode) return
     let alive = true
-
     const timer = window.setTimeout(() => {
-
       const search = q.trim()
-
       void apiJson<TeamRow[]>(
         `/teams${search ? `?q=${encodeURIComponent(search)}` : ''}`,
       )
-
         .then((t) => {
-          if (alive) setTeams(Array.isArray(t) ? t : [])
+          if (alive) setApiTeams(Array.isArray(t) ? t : [])
         })
-
         .catch(() => {})
-
     }, 200)
-
-
 
     return () => {
       alive = false
       window.clearTimeout(timer)
-
     }
-
-
-  }, [q])
+  }, [demoMode, q])
 
 
 
@@ -140,6 +177,36 @@ export function InvoiceSaleModal(props: {
     setErr(null)
     setCreateBusy(true)
     try {
+      // DEMO-Modus: ausschliesslich in-memory Demo-Team, KEIN POST /teams.
+      if (isDemoMode()) {
+        const t = addDemoTeam({
+          name,
+          shortName: undefined,
+          contactName: newContactName.trim(),
+          invoiceEmail: newInvoiceEmail.trim(),
+          phone: newPhone.trim(),
+          billingAddress: newBillingAddress.trim(),
+          paymentTermsDays: defaultPaymentDays,
+          active: true,
+        })
+        setTeamId(t.id)
+        setContact(newContactName.trim())
+        setQ('')
+        setShowNewTeam(false)
+        setNewName('')
+        setNewInvoiceEmail('')
+        setNewContactName('')
+        setNewPhone('')
+        setNewBillingAddress('')
+        setNewPaymentDays('14')
+        setNewCustomerNo('')
+        setNewInternalNote('')
+        setNewCostCenter('')
+        setNewDepartment('')
+        setNewLocalGroup('')
+        return
+      }
+
       const r = await apiJson<{ id: string }>('/teams', {
         method: 'POST',
         body: JSON.stringify({
@@ -164,7 +231,7 @@ export function InvoiceSaleModal(props: {
       const id = r?.id?.trim?.() ?? ''
       if (!id) throw new Error('Keine Team-ID von der API.')
 
-      setTeams((prev) => [
+      setApiTeams((prev) => [
         {
           id,
           name,
@@ -219,8 +286,8 @@ export function InvoiceSaleModal(props: {
         teamId,
         eventId,
         contactName: contact.trim() || undefined,
-
         note: note.trim() || undefined,
+        teamName: (selectedTeam?.name ?? '').trim(),
       })
     } catch (e) {
       setErr(String((e as Error).message || e))
@@ -243,7 +310,9 @@ export function InvoiceSaleModal(props: {
     >
       <div className="panel-dlrg w-full max-w-xl overflow-hidden rounded-2xl border border-[#ff003c]/50 shadow-[0_0_72px_rgba(255,0,60,0.35)]">
         <div className="border-b border-[#ff003c]/35 bg-neutral-950/80 px-5 py-4">
-          <h2 className="text-xl font-black tracking-wide text-[#FFD700]">Auf Rechnung verbuchen</h2>
+          <h2 className="text-xl font-black tracking-wide text-[#FFD700]">
+            {demoMode ? 'Auf Rechnung verbuchen (DEMO – simuliert)' : 'Auf Rechnung verbuchen'}
+          </h2>
 
 
           <p className="mt-1 text-sm font-semibold text-neutral-400">
@@ -253,6 +322,12 @@ export function InvoiceSaleModal(props: {
 
             <span className="text-[#FFD700]">{formatMoney(totalCents)}</span>
           </p>
+          {demoMode && (
+            <p className="mt-2 rounded-lg border border-yellow-500/40 bg-yellow-950/20 px-3 py-2 text-xs font-bold text-yellow-200">
+              Demo-Team – wird nicht dauerhaft gespeichert. Es wird KEINE echte
+              Rechnung erstellt, KEIN echter Umsatz erzeugt.
+            </p>
+          )}
         </div>
 
         <div className="max-h-[60vh] space-y-3 overflow-y-auto px-5 py-4">

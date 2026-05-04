@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiBlob, apiJson } from '../api/http'
-import { getStoredRole, hasApi } from '../api/config'
+import { getStoredRole, getStoredToken } from '../api/config'
 import { formatDateTime, formatMoney } from '../lib/format'
 import { parseEurosToCents } from '../lib/euroParse'
+import { TeamsManagement } from './TeamsManagement'
+import { useDemoMode } from '../demo/demoStore'
 
 type ApiRow = Record<string, unknown>
 
@@ -46,9 +48,9 @@ function saveBlob(blob: Blob, fn: string) {
 
 
 export function TeamsBilling() {
-  const apiLive = hasApi()
-  const admin = apiLive && getStoredRole() === 'admin'
-
+  const demoMode = useDemoMode()
+  const [authRev, setAuthRev] = useState(0)
+  const admin = Boolean(getStoredToken()) && getStoredRole() === 'admin'
 
   const [evtOpen, setEvtOpen] = useState('')
 
@@ -65,9 +67,6 @@ export function TeamsBilling() {
 
   const [invStatus, setInvStatus] = useState('')
   const [invNo, setInvNo] = useState('')
-
-
-  const [teamsDump, setTeamsDump] = useState<ApiRow[]>([])
 
 
   const [busy, setBusy] = useState(false)
@@ -94,43 +93,6 @@ export function TeamsBilling() {
 
   const [stWhy, setStWhy] = useState('')
 
-
-
-
-  /** quick team */
-
-
-
-
-
-
-  const [qn, setQn] = useState('')
-
-
-  const [qe, setQe] = useState('')
-
-
-  const [qa, setQa] = useState('')
-
-  const [qContact, setQContact] = useState('')
-
-  const [qPhone, setQPhone] = useState('')
-
-  const [qDays, setQDays] = useState('14')
-
-  const [qCustomerNo, setQCustomerNo] = useState('')
-
-  const [qInternal, setQInternal] = useState('')
-
-  const [qCc, setQCc] = useState('')
-
-  const [qDept, setQDept] = useState('')
-
-  const [qLocal, setQLocal] = useState('')
-
-
-
-
   const activeEvents = useMemo(
 
 
@@ -156,7 +118,14 @@ export function TeamsBilling() {
 
 
   const load = useCallback(async () => {
-
+    // DEMO-Modus: keine echten Rechnungs-/Open-Post-Daten anzeigen.
+    if (demoMode) {
+      setOpenRows([])
+      setInvRows([])
+      setEvents([])
+      setInfo(null)
+      return
+    }
 
     setBusy(true)
 
@@ -192,7 +161,15 @@ export function TeamsBilling() {
         `/invoices/list${qs.toString().length ? `?${qs}` : ''}`
 
 
-      const [op, iv, ev, tm] = await Promise.all([
+      const tok = getStoredToken()
+      if (!tok) {
+        setOpenRows([])
+        setInvRows([])
+        setEvents([])
+        return
+      }
+
+      const [op, iv, ev] = await Promise.all([
         apiJson<ApiRow[]>(opensPath),
 
 
@@ -205,7 +182,6 @@ export function TeamsBilling() {
 
         apiJson<ApiRow[]>('/events'),
 
-       admin ? apiJson<ApiRow[]>('/teams/all') : Promise.resolve([]),
 
 
 
@@ -220,10 +196,6 @@ export function TeamsBilling() {
 
 
       setEvents(Array.isArray(ev) ? ev : [])
-
-
-
-      setTeamsDump(Array.isArray(tm) ? tm : [])
 
 
 
@@ -247,25 +219,19 @@ export function TeamsBilling() {
     }
 
 
-  }, [evtOpen, invNo, invStatus, admin])
-
-
+  }, [evtOpen, invNo, invStatus, authRev, demoMode])
 
   useEffect(() => {
+    const fn = () => setAuthRev((x) => x + 1)
+    window.addEventListener('drk-kasse-auth', fn)
+    return () => window.removeEventListener('drk-kasse-auth', fn)
+  }, [])
 
-
-    if (!apiLive)
-
-
-      return
-
-
+  useEffect(() => {
     queueMicrotask(() => {
       void load()
     })
-
-
-  }, [apiLive, load])
+  }, [load])
 
 
 
@@ -284,7 +250,10 @@ export function TeamsBilling() {
 
 
   async function collective(teamId: string, eventId: string) {
-
+    if (demoMode) {
+      setInfo('DEMO – Sammelrechnung wird nicht erstellt.')
+      return
+    }
 
     if (!admin) return
 
@@ -337,84 +306,11 @@ export function TeamsBilling() {
 
 
 
-  async function quickTeam() {
-
-
-
-
-    if (!admin || !qn.trim())
-
-
-      return
-
-
-
-
-    const pd = Number.parseInt(qDays.trim(), 10)
-    const defaultPaymentDays =
-      Number.isFinite(pd) && pd > 0 ? pd : 14
-
-    await apiJson(`/teams`, {
-
-
-      method: 'POST',
-
-
-
-
-      body: JSON.stringify({
-        name: qn.trim(),
-
-        invoiceEmail: qe.trim(),
-
-        contactName: qContact.trim(),
-
-        phone: qPhone.trim(),
-
-        billingAddress: qa.trim(),
-
-        defaultPaymentDays,
-
-        ...(qCustomerNo.trim() ? { customerNo: qCustomerNo.trim() } : {}),
-
-        ...(qInternal.trim() ? { internalNote: qInternal.trim() } : {}),
-
-        ...(qCc.trim() ? { costCenter: qCc.trim() } : {}),
-
-        ...(qDept.trim() ? { department: qDept.trim() } : {}),
-
-        ...(qLocal.trim() ? { localGroup: qLocal.trim() } : {}),
-      }),
-
-
-
-
-    })
-
-
-    setQn('')
-    setQe('')
-    setQa('')
-    setQContact('')
-    setQPhone('')
-    setQDays('14')
-    setQCustomerNo('')
-    setQInternal('')
-    setQCc('')
-    setQDept('')
-    setQLocal('')
-
-
-    await load()
-
-
-  }
-
-
-
   async function dlPdf(invId: string, no: string) {
-
-
+    if (demoMode) {
+      setInfo('DEMO – kein PDF-Download.')
+      return
+    }
 
 
     const blob = await apiBlob(`/invoices/${invId}/pdf`)
@@ -428,8 +324,10 @@ export function TeamsBilling() {
 
 
   async function mail(invId: string) {
-
-
+    if (demoMode) {
+      setInfo('DEMO – kein Mail-Versand.')
+      return
+    }
 
 
     if (!admin)
@@ -466,6 +364,12 @@ export function TeamsBilling() {
 
 
   async function payGo() {
+    if (demoMode) {
+      setPayInv(null)
+      setPayEu('')
+      setInfo('DEMO – Zahlung wird nicht verbucht.')
+      return
+    }
 
 
     if (!payInv)
@@ -525,6 +429,12 @@ export function TeamsBilling() {
 
 
   async function stGo() {
+    if (demoMode) {
+      setStInv(null)
+      setStWhy('')
+      setInfo('DEMO – Storno wird nicht erzeugt.')
+      return
+    }
 
 
     if (!admin || !stInv || !stWhy.trim())
@@ -564,40 +474,21 @@ export function TeamsBilling() {
 
 
 
-  if (!apiLive)
-
-
-    return (
-
-
-      <p className="text-sm text-neutral-400">
-        Für diesen Bereich bitte{' '}
-
-
-        <code className="text-cyan-200">VITE_API_BASE_URL</code> konfigurieren und anmelden.
-
-
-
-      </p>
-
-
-
-    )
-
-
-
-
-
   return (
 
 
 
 
     <div className="space-y-10 pb-20">
+      <TeamsManagement onTeamsChanged={() => void load()} />
 
-
-
-
+      {demoMode && (
+        <div className="rounded-xl border-2 border-yellow-400/60 bg-yellow-950/15 px-4 py-3 text-sm font-bold text-yellow-100">
+          DEMO-Modus aktiv – Rechnungs- und Mahn-Aktionen sind deaktiviert. Es
+          werden keine echten Sammelrechnungen erstellt, keine E-Mails versendet,
+          keine Zahlungen verbucht und keine Stornos erzeugt.
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-4">
 
@@ -639,56 +530,6 @@ export function TeamsBilling() {
 
 
       </div>
-
-
-
-
-
-
-      {admin && (
-
-
-
-
-        <div className="rounded-xl border border-white/10 bg-black/30 p-4">
-
-
-
-
-
-          <h3 className="font-bold text-white">Neues Vereins‑/Team‑Konto</h3>
-
-
-
-          <p className="mt-2 text-xs text-neutral-400">
-            Stammdaten werden in der Datenbank gespeichert und stehen später in der Kasse unter „Auf Rechnung“ zur Auswahl.
-          </p>
-
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <input placeholder="Name *" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qn} onChange={(e) => setQn(e.target.value)} />
-            <input type="email" placeholder="Rechnungs‑E‑Mail" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qe} onChange={(e) => setQe(e.target.value)} />
-            <input placeholder="Telefon" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qPhone} onChange={(e) => setQPhone(e.target.value)} />
-            <input placeholder="Ansprechpartner/in" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qContact} onChange={(e) => setQContact(e.target.value)} />
-            <textarea placeholder="Rechnungsanschrift" rows={2} className="resize-y rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qa} onChange={(e) => setQa(e.target.value)} />
-            <input inputMode="numeric" placeholder="Zahlungsziel (Tage)" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qDays} onChange={(e) => setQDays(e.target.value)} />
-            <input placeholder="Kunden‑Nr." className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qCustomerNo} onChange={(e) => setQCustomerNo(e.target.value)} />
-            <input placeholder="Kostenstelle" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qCc} onChange={(e) => setQCc(e.target.value)} />
-            <input placeholder="Abteilung" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qDept} onChange={(e) => setQDept(e.target.value)} />
-            <input placeholder="Ortsgruppe" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qLocal} onChange={(e) => setQLocal(e.target.value)} />
-            <input placeholder="Interne Notiz" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qInternal} onChange={(e) => setQInternal(e.target.value)} />
-            <button type="button" className="rounded-lg bg-blue-900/70 px-4 py-2 font-bold text-white disabled:opacity-40 md:col-span-2" disabled={!qn.trim()} onClick={() => void quickTeam()}>
-              Team anlegen
-            </button>
-          </div>
-
-
-
-        </div>
-
-
-
-
-      )}
       {/* offene */}
       <section>
 
@@ -1771,72 +1612,6 @@ export function TeamsBilling() {
 
 
       </section>
-
-
-
-      {/* team dump */}
-      <section>
-
-
-
-        <h4 className="font-bold text-white">Alle Teams
-
-
-
-
-        </h4>
-
-
-
-        <div className="mt-3 max-h-48 overflow-auto text-[11px] text-neutral-300">
-
-
-
-
-
-          {teamsDump.map((t) => {
-
-
-
-
-            return (
-
-
-
-
-              <div key={String(t.id)} className="border-b border-white/5 py-1">
-
-
-
-
-
-                #{String(t.id)} • {String(t.name)}
-
-
-
-
-              </div>
-
-
-
-
-
-            )
-
-
-
-
-
-
-          })}
-        </div>
-
-
-
-      </section>
-
-
-
       {payInv && admin ? (
 
 

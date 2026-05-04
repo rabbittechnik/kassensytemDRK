@@ -5,36 +5,83 @@ import { setSetting } from '../db/sales'
 import { sha256Hex } from '../lib/pin'
 import { formatMoney } from '../lib/format'
 import { exportSalesCsv } from '../export/exportSales'
+import { exportDemoSalesCsv } from '../export/exportDemo'
 import type { CategoryRow, ProductRow } from '../types'
 import { TeamsBilling } from './TeamsBilling'
+import { ReceiptManagePanel } from './ReceiptManagePanel'
+import {
+  exitDemoMode,
+  snapshotDemoSales,
+  useDemoMode,
+  useDemoSales,
+} from '../demo/demoStore'
+import { DemoCodeOverlay } from '../demo/DemoCodeOverlay'
+import { logDemoModeAudit } from '../demo/demoAudit'
+import { DeviceInstallPanel } from '../pwa/DeviceInstallPanel'
+import { InstallAppButton } from '../pwa/InstallAppButton'
+import { IosInstallGuide } from '../pwa/IosInstallGuide'
+import { todayKey } from '../lib/format'
 
 const tabs = [
   'Artikel',
   'Kategorien',
   'Teams / Rechnungen',
   'Export',
+  'Gerät',
   'Einstellungen',
 ] as const
 
 export function AdminScreen(props: { onBack: () => void }) {
   const [tab, setTab] = useState<(typeof tabs)[number]>('Artikel')
+  const demoMode = useDemoMode()
+  const [demoCodeOpen, setDemoCodeOpen] = useState(false)
+  const [iosGuideOpen, setIosGuideOpen] = useState(false)
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-3 p-3 md:p-5">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Admin</h1>
+          <h1 className="text-2xl font-bold text-white">
+            {demoMode ? 'Admin (DEMO)' : 'Admin'}
+          </h1>
           <p className="text-sm text-slate-400">
             Artikel · Teams · Export · Einstellungen
           </p>
         </div>
-        <button
-          type="button"
-          onClick={props.onBack}
-          className="rounded-xl border-2 border-[#FFD700]/50 bg-black px-5 py-2 font-bold text-[#FFD700] hover:bg-neutral-950"
-        >
-          Zur Kasse
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <InstallAppButton
+            variant="admin"
+            onShowIosGuide={() => setIosGuideOpen(true)}
+          />
+          {demoMode ? (
+            <button
+              type="button"
+              onClick={() => {
+                void logDemoModeAudit('leave')
+                exitDemoMode()
+              }}
+              className="rounded-xl border-2 border-amber-400/70 bg-amber-500/15 px-4 py-2 font-black uppercase text-amber-100 hover:bg-amber-500/25"
+            >
+              Demo-Modus verlassen
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setDemoCodeOpen(true)}
+              className="rounded-xl border-2 border-yellow-500/50 bg-neutral-900 px-4 py-2 font-bold uppercase text-yellow-200 hover:bg-yellow-950/30"
+              title="Demo-Modus für Vorführungen aktivieren"
+            >
+              Demo-Modus
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={props.onBack}
+            className="rounded-xl border-2 border-[#FFD700]/50 bg-black px-5 py-2 font-bold text-[#FFD700] hover:bg-neutral-950"
+          >
+            Zur Kasse
+          </button>
+        </div>
       </header>
 
       <nav className="flex flex-wrap gap-2">
@@ -60,8 +107,17 @@ export function AdminScreen(props: { onBack: () => void }) {
         {tab === 'Kategorien' && <CategoriesAdmin />}
         {tab === 'Teams / Rechnungen' && <TeamsBilling />}
         {tab === 'Export' && <ExportPanel />}
+        {tab === 'Gerät' && <DeviceInstallPanel />}
         {tab === 'Einstellungen' && <SettingsPanel />}
       </div>
+
+      {demoCodeOpen && (
+        <DemoCodeOverlay onClose={() => setDemoCodeOpen(false)} />
+      )}
+
+      {iosGuideOpen && (
+        <IosInstallGuide variant="modal" onClose={() => setIosGuideOpen(false)} />
+      )}
     </div>
   )
 }
@@ -351,22 +407,39 @@ function CategoriesAdmin() {
 }
 
 function ExportPanel() {
+  const demoMode = useDemoMode()
+  const demoSales = useDemoSales()
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-white">
-        Export · Verkaufsübersicht
+        {demoMode ? 'Export · Verkaufsübersicht (DEMO)' : 'Export · Verkaufsübersicht'}
       </h2>
-      <p className="text-sm text-slate-400">
-        Alle gespeicherten Verkäufe werden als CSV exportiert (Kopfzeilen +
-        Positionen). Für einen einzelnen Tag nutzen Sie den Tagesabschluss auf
-        der Kasse.
-      </p>
+      {demoMode ? (
+        <p className="rounded-lg border border-yellow-500/40 bg-yellow-950/20 p-3 text-sm font-bold text-yellow-200">
+          DEMO-Export – nur Demo-Verkäufe werden ausgegeben. Die echten Verkäufe
+          (db.sales) werden NICHT angefasst.
+        </p>
+      ) : (
+        <p className="text-sm text-slate-400">
+          Alle gespeicherten Verkäufe werden als CSV exportiert (Kopfzeilen +
+          Positionen). Für einen einzelnen Tag nutzen Sie den Tagesabschluss auf
+          der Kasse.
+        </p>
+      )}
       <button
         type="button"
         className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 py-3 font-semibold text-white"
-        onClick={() => void exportSalesCsv()}
+        onClick={() => {
+          if (demoMode) {
+            const sales = demoSales.length > 0 ? demoSales : snapshotDemoSales()
+            const day = sales[0]?.dayKey ?? todayKey()
+            exportDemoSalesCsv(day, sales)
+          } else {
+            void exportSalesCsv()
+          }
+        }}
       >
-        Gesamter Export (CSV)
+        {demoMode ? 'Demo-Export (CSV)' : 'Gesamter Export (CSV)'}
       </button>
     </div>
   )
@@ -452,6 +525,75 @@ function SettingsPanel() {
       >
         PIN speichern
       </button>
+
+      <BonSettingsBlock />
+      <ReceiptManagePanel />
+    </div>
+  )
+}
+
+function BonSettingsBlock() {
+  const width = useLiveQuery(() => db.settings.where('key').equals('receiptWidthMm').first(), [])
+  const pc = useLiveQuery(() => db.settings.where('key').equals('printCustomerReceipt').first(), [])
+  const ps = useLiveQuery(() => db.settings.where('key').equals('printServingReceipt').first(), [])
+  const tag = useLiveQuery(() => db.settings.where('key').equals('receiptTagline').first(), [])
+  const reg = useLiveQuery(() => db.settings.where('key').equals('registerName').first(), [])
+  const cash = useLiveQuery(() => db.settings.where('key').equals('cashierName').first(), [])
+
+  return (
+    <div className="mt-6 space-y-3 rounded-2xl border border-cyan-500/25 bg-cyan-950/10 p-4">
+      <h3 className="font-semibold text-cyan-100">Bondruck</h3>
+      <label className="block text-xs text-slate-400">
+        Bonbreite
+        <select
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+          value={width?.value === '80' ? '80' : '58'}
+          onChange={(e) => void setSetting('receiptWidthMm', e.target.value)}
+        >
+          <option value="58">58 mm (ca. 32 Zeichen)</option>
+          <option value="80">80 mm (ca. 48 Zeichen)</option>
+        </select>
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={pc?.value !== '0'}
+          onChange={(e) => void setSetting('printCustomerReceipt', e.target.checked ? '1' : '0')}
+        />
+        Kundenbon automatisch drucken
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-300">
+        <input
+          type="checkbox"
+          checked={ps?.value !== '0'}
+          onChange={(e) => void setSetting('printServingReceipt', e.target.checked ? '1' : '0')}
+        />
+        Servierbon automatisch drucken
+      </label>
+      <label className="block text-xs text-slate-400">
+        Bon‑Spruch (optional, Zeilenumbruch möglich)
+        <textarea
+          className="mt-1 min-h-[72px] w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+          value={tag?.value ?? ''}
+          onChange={(e) => void setSetting('receiptTagline', e.target.value)}
+        />
+      </label>
+      <label className="block text-xs text-slate-400">
+        Kasse / Stand (auf Bon)
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+          value={reg?.value ?? ''}
+          onChange={(e) => void setSetting('registerName', e.target.value)}
+        />
+      </label>
+      <label className="block text-xs text-slate-400">
+        Kassierer/in (auf Bon & Nachdruck‑Protokoll)
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+          value={cash?.value ?? ''}
+          onChange={(e) => void setSetting('cashierName', e.target.value)}
+        />
+      </label>
     </div>
   )
 }

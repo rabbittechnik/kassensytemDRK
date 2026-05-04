@@ -1,17 +1,16 @@
-import { buildEscPosBytes, type ReceiptPayload } from './escpos'
+import {
+  buildEscPosBytes,
+  buildEscPosPlainText,
+  buildEscPosPlainTextBlocks,
+  type ReceiptPayload,
+} from './escpos'
 
 export interface BluetoothPrintResult {
   ok: boolean
   message: string
 }
 
-/**
- * Web Bluetooth: Bondrucker sprechen oft GATT (z. B. HM-10/seriell-GATT-Adapter oder native BLE-Drucker).
- * Geräte unterscheiden sich stark – hier: alle Services durchsuchen und erste schreibbare Charakteristik nutzen.
- */
-export async function tryBluetoothPrint(
-  payload: ReceiptPayload,
-): Promise<BluetoothPrintResult> {
+async function sendEscPosBytes(bytes: Uint8Array): Promise<BluetoothPrintResult> {
   if (!navigator.bluetooth?.requestDevice) {
     return {
       ok: false,
@@ -19,8 +18,6 @@ export async function tryBluetoothPrint(
         'Web Bluetooth nicht verfügbar (HTTPS, Chrome/Edge auf Desktop/Android). Bon kann kopiert oder als Datei gespeichert werden.',
     }
   }
-
-  const bytes = buildEscPosBytes(payload)
 
   try {
     const device = await navigator.bluetooth.requestDevice({
@@ -66,6 +63,29 @@ export async function tryBluetoothPrint(
     }
     return { ok: false, message: msg }
   }
+}
+
+/**
+ * Web Bluetooth: Bondrucker sprechen oft GATT (z. B. HM-10/seriell-GATT-Adapter oder native BLE-Drucker).
+ * Geräte unterscheiden sich stark – hier: alle Services durchsuchen und erste schreibbare Charakteristik nutzen.
+ */
+export async function tryBluetoothPrint(
+  payload: ReceiptPayload,
+): Promise<BluetoothPrintResult> {
+  return sendEscPosBytes(buildEscPosBytes(payload))
+}
+
+/** Ein vorgeformter Text-Bon (Kunden- oder Servierbon). */
+export async function tryBluetoothPrintPlainText(text: string): Promise<BluetoothPrintResult> {
+  return sendEscPosBytes(buildEscPosPlainText(text, true))
+}
+
+/** Kunden- und Servierbon in einem Bluetooth-Gang (ein Gerät wählen). */
+export async function tryBluetoothPrintPlainSequence(
+  customerText: string,
+  servingText: string,
+): Promise<BluetoothPrintResult> {
+  return sendEscPosBytes(buildEscPosPlainTextBlocks([customerText, servingText], true))
 }
 
 export function downloadTextFile(filename: string, text: string): void {

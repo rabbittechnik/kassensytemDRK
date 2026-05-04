@@ -75,6 +75,56 @@ export function buildEscPosBytes(payload: ReceiptPayload): Uint8Array {
   return out
 }
 
+/** ESC/POS aus vorgeformtem ASCII/Plaintext (Thermobon). */
+export function buildEscPosPlainText(text: string, withCut = true): Uint8Array {
+  const chunks: Uint8Array[] = []
+  const push = (u: Uint8Array) => chunks.push(u)
+  push(new Uint8Array(initBuffer()))
+  push(new Uint8Array([ESC, 0x61, 0]))
+  for (const raw of text.split(/\r?\n/)) {
+    push(line([asciiReceipt(raw)]))
+  }
+  push(line(['']))
+  if (withCut) push(new Uint8Array([GS, 0x56, 0x41, 3]))
+  const totalLen = chunks.reduce((a, c) => a + c.length, 0)
+  const out = new Uint8Array(totalLen)
+  let o = 0
+  for (const c of chunks) {
+    out.set(c, o)
+    o += c.length
+  }
+  return out
+}
+
+/** Mehrere Textblöcke (z. B. Kunden- + Servierbon) in einem ESC/POS-Auftrag, nur ein Drucker-Init. */
+export function buildEscPosPlainTextBlocks(blocks: string[], withCut = true): Uint8Array {
+  const chunks: Uint8Array[] = []
+  const push = (u: Uint8Array) => chunks.push(u)
+  push(new Uint8Array(initBuffer()))
+  push(new Uint8Array([ESC, 0x61, 0]))
+  blocks.forEach((block, bi) => {
+    if (bi > 0) {
+      push(line(['']))
+      push(line(['']))
+      push(line(['----------']))
+      push(line(['']))
+    }
+    for (const raw of block.split(/\r?\n/)) {
+      push(line([asciiReceipt(raw)]))
+    }
+  })
+  push(line(['']))
+  if (withCut) push(new Uint8Array([GS, 0x56, 0x41, 3]))
+  const totalLen = chunks.reduce((a, c) => a + c.length, 0)
+  const out = new Uint8Array(totalLen)
+  let o = 0
+  for (const c of chunks) {
+    out.set(c, o)
+    o += c.length
+  }
+  return out
+}
+
 export function receiptAsPlainText(payload: ReceiptPayload): string {
   const dt = new Date(payload.createdAt).toLocaleString('de-DE')
   const lines: string[] = [

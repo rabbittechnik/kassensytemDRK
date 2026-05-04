@@ -5,24 +5,80 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    /** Wenn `VITE_API_BASE_URL=/api` und API lokal mit API_MOUNT_PATH=/api: Proxy zum Dev-Server */
+    proxy: {
+      '/api': {
+        target: process.env.VITE_DEV_API_TARGET ?? 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [
     react(),
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: [
+        'favicon.svg',
+        'icons/icon.svg',
+        'icons/icon-192.png',
+        'icons/icon-512.png',
+        'icons/icon-512-maskable.png',
+        'icons/apple-touch-icon-180.png',
+      ],
       manifest: {
+        id: '/',
         name: 'DLRG Kasse',
         short_name: 'DLRG Kasse',
         description: 'Touch-Kassensystem für DLRG-Veranstaltungen (offline)',
-        theme_color: '#0a0e17',
-        background_color: '#05080f',
+        // DLRG-Farben: Rot als Theme, dunkler Splash-Hintergrund.
+        theme_color: '#e30613',
+        background_color: '#0b0b0f',
         display: 'standalone',
         orientation: 'any',
         start_url: '/',
+        scope: '/',
+        lang: 'de',
+        icons: [
+          {
+            src: '/icons/icon-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/icons/icon-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
+          },
+          {
+            src: '/icons/icon-512-maskable.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2}'],
+        globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2,webmanifest}'],
+        // Cache nur App-Shell, NIE echte Kassendaten / API-Responses.
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//],
+        runtimeCaching: [
+          {
+            urlPattern: /^.*\/assets\/products\/.*\.(?:png|jpe?g|webp)$/,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'dlrg-products',
+              expiration: {
+                maxEntries: 200,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+            },
+          },
+        ],
         // Seed product PNGs exceed Workbox default 2 MiB precache limit
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
       },

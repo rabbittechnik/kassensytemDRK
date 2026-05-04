@@ -35,6 +35,46 @@ export interface SaleRow {
   totalCents: number
   paymentMethod: PaymentMethod
   receiptNo: number
+  /** Kassenbeleg (Kundenbon), ohne Nachdruck-Kopf */
+  customerReceiptText?: string
+  /** Servierbon / Ausgabe, ohne Nachdruck-Kopf */
+  servingReceiptText?: string
+  customerReceiptPdfPath?: string
+  servingReceiptPdfPath?: string
+  printedCustomerReceipt?: boolean
+  printedServingReceipt?: boolean
+  customerReceiptPrintCount?: number
+  servingReceiptPrintCount?: number
+  /** z. B. Teamname bei Rechnung (lokal derzeit nur Bar/Karte) */
+  invoiceTeamNameSnapshot?: string
+}
+
+/** Server-Verkäufe: Bons clientseitig für Nachdruck (IndexedDB) */
+export interface DualReceiptArchiveRow {
+  id: string
+  serverSaleId: string
+  receiptNo: number
+  createdAt: number
+  paymentMethod: PaymentMethod
+  totalCents: number
+  teamName?: string
+  /** JSON `ReceiptLineModel[]` für Nachdruck-Layout */
+  linesJson: string
+  customerReceiptText: string
+  servingReceiptText: string
+  printedCustomerReceipt: boolean
+  printedServingReceipt: boolean
+  customerReceiptPrintCount: number
+  servingReceiptPrintCount: number
+}
+
+export interface ReceiptReprintLogRow {
+  id?: number
+  /** lokale `sale.id` oder `remote:${serverSaleId}` bzw. Archiv-`id` */
+  saleRef: string
+  kind: 'customer' | 'serving'
+  at: number
+  userLabel: string
 }
 
 export interface SaleLineRow {

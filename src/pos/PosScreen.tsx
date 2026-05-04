@@ -4,7 +4,16 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 
 import { db } from '../db/database'
-import { getSetting, saveSale } from '../db/sales'
+import {
+  bumpLocalSalePrintSuccess,
+  bumpRemoteArchivePrintSuccess,
+  buildReceiptLineModelsFromCatalog,
+  completeLocalSaleWithDualReceipts,
+  getSetting,
+  persistRemoteDualReceiptArchive,
+  readReceiptFormattingContext,
+  renderDualReceiptTexts,
+} from '../db/sales'
 import type { CartLine, CategoryRow, PaymentMethod, ProductRow } from '../types'
 import type { ReceiptPayload } from '../receipt/escpos'
 import { formatMoney, todayKey } from '../lib/format'
@@ -12,7 +21,10 @@ import { receiptAsPlainText } from '../receipt/escpos'
 import {
   downloadTextFile,
   tryBluetoothPrint,
+  tryBluetoothPrintPlainSequence,
+  tryBluetoothPrintPlainText,
 } from '../receipt/bluetoothPrint'
+import { printDualReceiptsAfterSale } from '../receipt/printAfterSale'
 import { CardPaymentModal } from './CardPaymentModal'
 import { SuccessToast } from './SuccessToast'
 import { ProductVisual } from './productVisual'
@@ -21,6 +33,24 @@ import { InvoiceSaleModal } from './InvoiceSaleModal'
 import { hasApi } from '../api/config'
 import { apiJson } from '../api/http'
 import { apiCreateSale, type ApiPaymentBody } from '../api/sales'
+import {
+  addDemoSale,
+  buildDemoLines,
+  exitDemoMode,
+  isDemoMode,
+  nextDemoReceiptNo,
+  useDemoMode,
+  useDemoSales,
+} from '../demo/demoStore'
+import {
+  formatDemoCustomerReceipt,
+  formatDemoServingReceipt,
+  formatDemoTestPrint,
+} from '../demo/demoReceipts'
+import { DemoCodeOverlay } from '../demo/DemoCodeOverlay'
+import { logDemoModeAudit } from '../demo/demoAudit'
+import { InstallAppButton } from '../pwa/InstallAppButton'
+import { IosInstallGuide } from '../pwa/IosInstallGuide'
 
 function tabCls(active: boolean) {
   return [
@@ -168,17 +198,30 @@ export function PosScreen({
         .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
     : (dexProducts ?? [])
 
+  const demoMode = useDemoMode()
+  const demoSales = useDemoSales()
+  const [demoCodeOpen, setDemoCodeOpen] = useState(false)
+  const [iosGuideOpen, setIosGuideOpen] = useState(false)
+
   const dayKey = useMemo(() => todayKey(), [])
   const salesDex = useLiveQuery(
     () => db.sales.where('dayKey').equals(dayKey).toArray(),
     [dayKey],
   )
   const tagesumsatz = useMemo(() => {
+    if (demoMode) return demoSales.reduce((a, s) => a + s.totalCents, 0)
     if (remoteMode) return null
     return salesDex?.reduce((a, s) => a + s.totalCents, 0) ?? 0
-  }, [remoteMode, salesDex])
+  }, [demoMode, demoSales, remoteMode, salesDex])
 
   const [cart, setCart] = useState<CartLine[]>([])
+
+  // Cart beim Verlassen des Demo-Modus leeren, damit keine Demo-Reste in
+  // einem realen Verkauf landen.
+  useEffect(() => {
+    if (!demoMode) setCart([])
+  }, [demoMode])
+
   const cartRef = useRef(cart)
   useEffect(() => {
     cartRef.current = cart
@@ -281,72 +324,90 @@ export function PosScreen({
     }
   }, [cart.length, pushPast])
 
-  const buildPayload = useCallback(
-    async (
-      lines: CartLine[],
-      method: PaymentMethod,
-      receiptNo: number,
-      createdAt: number,
-    ): Promise<ReceiptPayload> => {
-      let org = (await getSetting('orgName')) ?? 'DLRG'
-      if (remoteMode && !String(org).trim()) {
-        try {
-          const s = await apiJson<{ org_name?: string }>('/settings')
-          org = s.org_name ?? 'DLRG'
-        } catch {
-          org = 'DLRG'
-        }
-      }
-      const footer = await getSetting('receiptFooter')
-      const totalCents = lines.reduce((s, l) => s + l.priceCents * l.qty, 0)
-      return {
-        orgName: org,
-        createdAt,
-        receiptNo,
-        lines: lines.map((l) => ({
-          name: l.name,
-          qty: l.qty,
-          unitCents: l.priceCents,
-          lineCents: l.priceCents * l.qty,
-        })),
-        totalCents,
-        payment: method,
-        footer: footer || undefined,
-      }
-    },
-    [remoteMode],
-  )
-
-  const printPayload = useCallback(
-    async (payload: ReceiptPayload) => {
-      setPrintBusy(true)
-      const res = await tryBluetoothPrint(payload)
-      setPrintBusy(false)
-      if (!res.ok) {
-        const txt = receiptAsPlainText(payload)
-        downloadTextFile(`dlrg-bon-${payload.receiptNo}.txt`, txt)
-        showToast(
-          res.message.includes('nicht verfügbar')
-            ? 'Kein Bluetooth – Bon als Textdatei gespeichert.'
-            : `${res.message} Text-Bon gespeichert.`,
-          4000,
-        )
-      } else {
-        showToast('Bon gesendet.')
-      }
-    },
-    [],
-  )
-
   /** Abschluss: lokal IndexedDB oder API */
   const settleAndPrint = useCallback(
     async (
       method: PaymentMethod,
       apiPay?: ApiPaymentBody,
-      opts?: { offlineSkipReceiptPrint?: boolean },
+      opts?: { offlineSkipReceiptPrint?: boolean; teamName?: string },
     ) => {
       if (cart.length === 0 || total <= 0) return
       const snap = [...cart]
+
+      // ---------- DEMO-MODUS ----------
+      // Niemals echte Persistenz: kein apiCreateSale, kein
+      // completeLocalSaleWithDualReceipts, keine Bestandsaenderung,
+      // keine TSE. Stattdessen reine in-memory Demo-Sale.
+      if (isDemoMode()) {
+        try {
+          const cats = remoteMode ? (remoteCategories ?? []) : (dexCategories ?? [])
+          const prods = remoteMode ? remoteProducts : (dexProducts ?? [])
+          const lookup = (id: string) => {
+            const p = prods.find((x) => x.id === id)
+            if (!p) return null
+            const c = cats.find((x) => x.id === p.categoryId)
+            return {
+              categoryId: p.categoryId,
+              categoryName: c?.name ?? 'Sonstige',
+              categorySort: c?.sortOrder ?? 999,
+            }
+          }
+          const lines = buildDemoLines(snap, lookup)
+          const totalCents = lines.reduce((s, l) => s + l.lineTotalCents, 0)
+          const { n: demoNo, label } = nextDemoReceiptNo()
+          const createdAt = Date.now()
+          const teamName = opts?.teamName
+          const customer = formatDemoCustomerReceipt({
+            bonNumberLabel: label,
+            createdAt,
+            lines,
+            totalCents,
+            paymentMethod: method,
+            teamName,
+          })
+          const serving = formatDemoServingReceipt({
+            bonNumberLabel: label,
+            createdAt,
+            lines,
+            totalCents,
+            paymentMethod: method,
+            teamName,
+          })
+          addDemoSale({
+            id: `demo-sale-${crypto.randomUUID()}`,
+            demoNo,
+            bonNumberLabel: label,
+            createdAt,
+            dayKey: todayKey(new Date(createdAt)),
+            totalCents,
+            paymentMethod: method,
+            lines,
+            customerReceiptText: customer,
+            servingReceiptText: serving,
+            teamName,
+          })
+          setCart([])
+
+          // Druck (best effort) - keine Bumps in echte Tabellen.
+          const skipPrint = opts?.offlineSkipReceiptPrint === true
+          if (!skipPrint) {
+            try {
+              await tryBluetoothPrintPlainSequence(customer, serving)
+            } catch {
+              /* ignore */
+            }
+          }
+          showToast(
+            `DEMO-Verkauf simuliert (${label}). Keine echte Buchung.`,
+            3200,
+          )
+        } catch (e) {
+          showToast(`Demo-Fehler: ${String((e as Error).message ?? e)}`, 4000)
+        }
+        return
+      }
+      // -------- /DEMO-MODUS ----------
+
       try {
         if (remoteMode) {
           if (!apiPay) throw new Error('MISSING_PAYMENT')
@@ -362,28 +423,78 @@ export function PosScreen({
             clientUuid,
           })
           setCart([])
-          const payload = await buildPayload(snap, method, sale.receiptNo, sale.createdAt)
-          await printPayload(payload)
-          showToast(
-            sale.duplicate ? 'Erneuter Druck – bereits verbucht.' : 'Verbucht (Server).',
-            2600,
-          )
-        } else {
-          const { receiptNo, createdAt } = await saveSale(snap, method)
-          setCart([])
-          const skipPrint =
-            opts?.offlineSkipReceiptPrint === true && method === 'cash'
-          if (!skipPrint) {
-            const payload = await buildPayload(snap, method, receiptNo, createdAt)
-            await printPayload(payload)
+          if (sale.duplicate) {
+            showToast('Erneuter Druck – bereits verbucht.', 2600)
+            return
           }
-          showToast(
-            method === 'cash'
-              ? skipPrint
-                ? 'Verbucht.'
-                : 'Barzahlung verbucht.'
-              : 'Kartenzahlung verbucht.',
+          const teamName = opts?.teamName
+          const cats = remoteCategories ?? []
+          const prods = remoteProducts ?? []
+          const models = buildReceiptLineModelsFromCatalog(snap, prods, cats)
+          const ctx = await readReceiptFormattingContext()
+          const { customer, serving } = renderDualReceiptTexts(
+            ctx,
+            models,
+            method,
+            sale.receiptNo,
+            sale.createdAt,
+            false,
+            method === 'invoice' ? teamName : undefined,
           )
+          const archiveId = await persistRemoteDualReceiptArchive({
+            serverSaleId: sale.id,
+            receiptNo: sale.receiptNo,
+            createdAt: sale.createdAt,
+            paymentMethod: method,
+            totalCents: snap.reduce((s, l) => s + l.priceCents * l.qty, 0),
+            teamName: method === 'invoice' ? teamName : undefined,
+            linesJson: JSON.stringify(models),
+            customerReceiptText: customer,
+            servingReceiptText: serving,
+            printedCustomerReceipt: false,
+            printedServingReceipt: false,
+            customerReceiptPrintCount: 0,
+            servingReceiptPrintCount: 0,
+          })
+          const printRes = await printDualReceiptsAfterSale({
+            customerText: customer,
+            servingText: serving,
+            receiptNo: sale.receiptNo,
+            skipAutoPrint: false,
+            bumps: {
+              bumpCustomer: async () => bumpRemoteArchivePrintSuccess(archiveId, 'customer'),
+              bumpServing: async () => bumpRemoteArchivePrintSuccess(archiveId, 'serving'),
+            },
+          })
+          if (printRes.hadFailure) showToast(printRes.message, 5000)
+          else if (printRes.printedAnything) showToast('Verbucht (Server). Bons gedruckt.', 2600)
+          else showToast('Verbucht (Server).', 2600)
+        } else {
+          if (method === 'invoice') throw new Error('Rechnung nur mit Server-API.')
+          const r = await completeLocalSaleWithDualReceipts(snap, method)
+          setCart([])
+          const skipPrint = opts?.offlineSkipReceiptPrint === true && method === 'cash'
+          const printRes = await printDualReceiptsAfterSale({
+            customerText: r.customerReceiptText,
+            servingText: r.servingReceiptText,
+            receiptNo: r.receiptNo,
+            skipAutoPrint: skipPrint,
+            bumps: {
+              bumpCustomer: async () => bumpLocalSalePrintSuccess(r.saleId, 'customer'),
+              bumpServing: async () => bumpLocalSalePrintSuccess(r.saleId, 'serving'),
+            },
+          })
+          if (printRes.hadFailure) showToast(printRes.message, 5000)
+          else if (printRes.printedAnything)
+            showToast(method === 'cash' ? 'Barzahlung verbucht.' : 'Kartenzahlung verbucht.', 2600)
+          else
+            showToast(
+              method === 'cash'
+                ? skipPrint
+                  ? 'Verbucht.'
+                  : 'Barzahlung verbucht.'
+                : 'Kartenzahlung verbucht.',
+            )
         }
       } catch (e) {
         if (remoteMode && apiPay) {
@@ -406,7 +517,7 @@ export function PosScreen({
         showToast(String((e as Error).message ?? e), 5000)
       }
     },
-    [cart, total, remoteMode, buildPayload, printPayload],
+    [cart, total, remoteMode, remoteCategories, remoteProducts, dexCategories, dexProducts],
   )
 
   const syncOutbox = useCallback(async () => {
@@ -444,6 +555,22 @@ export function PosScreen({
     window.addEventListener('online', onOnline)
     return () => window.removeEventListener('online', onOnline)
   }, [remoteMode, syncOutbox])
+
+  const handleTestPrint = useCallback(async () => {
+    const text = formatDemoTestPrint()
+    setPrintBusy(true)
+    try {
+      const res = await tryBluetoothPrintPlainText(text)
+      if (res.ok) {
+        showToast('Testbon gesendet.', 2400)
+      } else {
+        downloadTextFile(`dlrg-testbon.txt`, text)
+        showToast('Bluetooth nicht möglich – Testbon als Datei.', 3500)
+      }
+    } finally {
+      setPrintBusy(false)
+    }
+  }, [])
 
   const handlePrintDraft = useCallback(async () => {
     if (cart.length === 0) {
@@ -524,6 +651,7 @@ export function PosScreen({
 
   const revLabel =
     typeof tagesumsatz === 'number' ? formatMoney(tagesumsatz) : '(API‑Modus)'
+  const revHeading = demoMode ? 'DEMO‑Tagesumsatz' : 'Tagesumsatz'
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black font-bold text-white">
@@ -566,7 +694,7 @@ export function PosScreen({
             </span>
             <div>
               <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
-                Tagesumsatz
+                {revHeading}
               </div>
               <div className="text-lg tabular-nums text-[#FFD700] md:text-xl">
                 {revLabel}
@@ -586,6 +714,10 @@ export function PosScreen({
               </div>
             </div>
           </div>
+          <InstallAppButton
+            variant="pos"
+            onShowIosGuide={() => setIosGuideOpen(true)}
+          />
         </div>
       </header>
 
@@ -778,9 +910,9 @@ export function PosScreen({
           </button>
           <button
             type="button"
-            disabled={cart.length === 0 || !remoteMode}
+            disabled={cart.length === 0 || (!remoteMode && !demoMode)}
             onClick={() => setInvoiceOpen(true)}
-            title={!remoteMode ? 'Erfordert API + Login' : ''}
+            title={!remoteMode && !demoMode ? 'Erfordert API + Login' : ''}
             className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-black px-4 py-2 text-lg font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-neutral-950 disabled:opacity-35"
           >
             Auf Rechnung
@@ -849,6 +981,37 @@ export function PosScreen({
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
+            {demoMode ? (
+              <>
+                <button
+                  type="button"
+                  disabled={printBusy}
+                  onClick={() => void handleTestPrint()}
+                  className="rounded-lg border border-yellow-400/60 bg-yellow-950/30 px-3 py-2 text-xs font-bold uppercase text-yellow-200 hover:bg-yellow-950/50 disabled:opacity-40"
+                >
+                  Testbon drucken
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void logDemoModeAudit('leave')
+                    exitDemoMode()
+                  }}
+                  className="rounded-lg border-2 border-amber-400/70 bg-amber-500/15 px-3 py-2 text-xs font-black uppercase text-amber-100 hover:bg-amber-500/25"
+                >
+                  Demo-Modus verlassen
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setDemoCodeOpen(true)}
+                className="rounded-lg border border-yellow-500/50 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-yellow-200 hover:bg-yellow-950/40"
+                title="Demo-Modus für Vorführungen"
+              >
+                Demo-Modus
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onOpenAdmin()}
@@ -873,7 +1036,7 @@ export function PosScreen({
         <CashTenderModal
           subtitleHint={
             !remoteMode && offlineCashVariant === 'noBon'
-              ? 'Lokaler Schnell‑Abschluss: wie früher mit Enter/Taste ✓ — nach „Verbuchen“ ohne automatischen Bondruck.'
+              ? 'Schnellabschluss: Kunden- und Servierbon werden gespeichert, aber nicht automatisch gedruckt. Nachdruck unter Admin → Einstellungen → Bon‑Verwaltung.'
               : undefined
           }
           totalCents={total}
@@ -920,19 +1083,31 @@ export function PosScreen({
           totalCents={total}
           onCancel={() => setInvoiceOpen(false)}
           onConfirmed={async (p) => {
-            await settleAndPrint('invoice', {
-              method: 'invoice',
-              teamId: p.teamId,
-              eventId: p.eventId,
-              contactName: p.contactName,
-              note: p.note,
-            })
+            await settleAndPrint(
+              'invoice',
+              {
+                method: 'invoice',
+                teamId: p.teamId,
+                eventId: p.eventId,
+                contactName: p.contactName,
+                note: p.note,
+              },
+              { teamName: p.teamName },
+            )
             setInvoiceOpen(false)
           }}
         />
       )}
 
       {toast && <SuccessToast message={toast} />}
+
+      {demoCodeOpen && (
+        <DemoCodeOverlay onClose={() => setDemoCodeOpen(false)} />
+      )}
+
+      {iosGuideOpen && (
+        <IosInstallGuide variant="modal" onClose={() => setIosGuideOpen(false)} />
+      )}
     </div>
   )
 }
