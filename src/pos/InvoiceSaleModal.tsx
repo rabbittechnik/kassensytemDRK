@@ -36,6 +36,8 @@ export function InvoiceSaleModal(props: {
   }) => void | Promise<void>
 }) {
 
+  const { cartLines, totalCents, onCancel, onConfirmed } = props
+
   const [q, setQ] = useState('')
 
   const [teams, setTeams] = useState<TeamRow[]>([])
@@ -46,6 +48,31 @@ export function InvoiceSaleModal(props: {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+
+  const [showNewTeam, setShowNewTeam] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newInvoiceEmail, setNewInvoiceEmail] = useState('')
+  const [newContactName, setNewContactName] = useState('')
+  const [newPhone, setNewPhone] = useState('')
+  const [newBillingAddress, setNewBillingAddress] = useState('')
+  const [newPaymentDays, setNewPaymentDays] = useState('14')
+  const [newCustomerNo, setNewCustomerNo] = useState('')
+  const [newInternalNote, setNewInternalNote] = useState('')
+  const [newCostCenter, setNewCostCenter] = useState('')
+  const [newDepartment, setNewDepartment] = useState('')
+  const [newLocalGroup, setNewLocalGroup] = useState('')
+  const [createBusy, setCreateBusy] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
 
   useEffect(() => {
     let alive = true
@@ -101,6 +128,73 @@ export function InvoiceSaleModal(props: {
 
   const selectedTeam = useMemo(() => teams.find((t) => t.id === teamId), [teamId, teams])
 
+  async function createTeamAndSelect() {
+    const name = newName.trim()
+    if (!name) {
+      setErr('Teamname angeben.')
+      return
+    }
+    const pd = Number.parseInt(newPaymentDays.trim(), 10)
+    const defaultPaymentDays = Number.isFinite(pd) && pd > 0 ? pd : 14
+
+    setErr(null)
+    setCreateBusy(true)
+    try {
+      const r = await apiJson<{ id: string }>('/teams', {
+        method: 'POST',
+        body: JSON.stringify({
+          name,
+          invoiceEmail: newInvoiceEmail.trim(),
+          contactName: newContactName.trim(),
+          phone: newPhone.trim(),
+          billingAddress: newBillingAddress.trim(),
+          defaultPaymentDays,
+          ...(newCustomerNo.trim()
+            ? { customerNo: newCustomerNo.trim() }
+            : {}),
+          ...(newInternalNote.trim()
+            ? { internalNote: newInternalNote.trim() }
+            : {}),
+          ...(newCostCenter.trim() ? { costCenter: newCostCenter.trim() } : {}),
+          ...(newDepartment.trim() ? { department: newDepartment.trim() } : {}),
+          ...(newLocalGroup.trim() ? { localGroup: newLocalGroup.trim() } : {}),
+        }),
+      })
+
+      const id = r?.id?.trim?.() ?? ''
+      if (!id) throw new Error('Keine Team-ID von der API.')
+
+      setTeams((prev) => [
+        {
+          id,
+          name,
+          contact_name: newContactName.trim(),
+          invoice_email: newInvoiceEmail.trim() || null,
+        },
+        ...prev.filter((t) => t.id !== id),
+      ])
+      setTeamId(id)
+      setContact(newContactName.trim())
+      setQ('')
+      setShowNewTeam(false)
+      setNewName('')
+      setNewInvoiceEmail('')
+      setNewContactName('')
+      setNewPhone('')
+      setNewBillingAddress('')
+      setNewPaymentDays('14')
+      setNewCustomerNo('')
+      setNewInternalNote('')
+      setNewCostCenter('')
+      setNewDepartment('')
+      setNewLocalGroup('')
+    } catch (e) {
+      setErr(String((e as Error).message ?? e))
+    } finally {
+      setCreateBusy(false)
+    }
+  }
+
   async function submit() {
     setErr(null)
 
@@ -121,7 +215,7 @@ export function InvoiceSaleModal(props: {
     setBusy(true)
 
     try {
-      await props.onConfirmed({
+      await onConfirmed({
         teamId,
         eventId,
         contactName: contact.trim() || undefined,
@@ -153,10 +247,11 @@ export function InvoiceSaleModal(props: {
 
 
           <p className="mt-1 text-sm font-semibold text-neutral-400">
-            Team wählen, Veranstaltung zuordnen, optional Hinweis. Summe{' '}
+            Team wählen, Veranstaltung zuordnen, optional Hinweis. Esc oder „Zurück“
+            ohne Buchung schließen. Summe{' '}
 
 
-            <span className="text-[#FFD700]">{formatMoney(props.totalCents)}</span>
+            <span className="text-[#FFD700]">{formatMoney(totalCents)}</span>
           </p>
         </div>
 
@@ -181,7 +276,128 @@ export function InvoiceSaleModal(props: {
 
           </label>
 
-
+          <div className="overflow-hidden rounded-xl border border-[#FFD700]/25 bg-yellow-950/10">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#FFD700]"
+              onClick={() => setShowNewTeam((v) => !v)}
+              aria-expanded={showNewTeam}
+            >
+              <span>Neues Team / Verein anlegen (Server)</span>
+              <span className="tabular-nums text-neutral-400">{showNewTeam ? '▾' : '▸'}</span>
+            </button>
+            {showNewTeam ? (
+            <div className="space-y-2 border-t border-white/10 px-4 py-3">
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                Name *
+                <input
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  placeholder="z. B. DLRG Ortsgruppe …"
+                />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                Rechnungs-E-Mail
+                <input
+                  type="email"
+                  value={newInvoiceEmail}
+                  onChange={(e) => setNewInvoiceEmail(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                />
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Ansprechpartner/in
+                  <input
+                    value={newContactName}
+                    onChange={(e) => setNewContactName(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  />
+                </label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Telefon
+                  <input
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  />
+                </label>
+              </div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                Rechnungsanschrift
+                <textarea
+                  value={newBillingAddress}
+                  onChange={(e) => setNewBillingAddress(e.target.value)}
+                  rows={2}
+                  className="mt-1 w-full resize-y rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-sm text-white outline-none focus:border-[#FFD700]/50"
+                />
+              </label>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                Zahlungsziel (Tage)
+                <input
+                  inputMode="numeric"
+                  value={newPaymentDays}
+                  onChange={(e) => setNewPaymentDays(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50 sm:max-w-[10rem]"
+                />
+              </label>
+              <p className="text-[11px] text-neutral-500">Optional:</p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Kunden‑Nr.
+                  <input
+                    value={newCustomerNo}
+                    onChange={(e) => setNewCustomerNo(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  />
+                </label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Kostenstelle
+                  <input
+                    value={newCostCenter}
+                    onChange={(e) => setNewCostCenter(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  />
+                </label>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Abteilung
+                  <input
+                    value={newDepartment}
+                    onChange={(e) => setNewDepartment(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  />
+                </label>
+                <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                  Ortsgruppe
+                  <input
+                    value={newLocalGroup}
+                    onChange={(e) => setNewLocalGroup(e.target.value)}
+                    className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                  />
+                </label>
+              </div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-neutral-500">
+                Interne Notiz
+                <input
+                  value={newInternalNote}
+                  onChange={(e) => setNewInternalNote(e.target.value)}
+                  className="mt-1 w-full rounded-xl border border-[#ff003c]/35 bg-neutral-950 px-3 py-2 text-white outline-none focus:border-[#FFD700]/50"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={createBusy || !newName.trim()}
+                className="w-full rounded-xl border-2 border-[#FFD700]/60 bg-black/60 py-3 font-black text-[#FFD700] hover:bg-yellow-950/30 disabled:opacity-40"
+                onClick={() => void createTeamAndSelect()}
+              >
+                Team speichern &amp; auswählen
+              </button>
+            </div>
+            ) : null}
+          </div>
 
           <div className="max-h-40 overflow-y-auto rounded-xl border border-white/10">
             {(teams ?? []).length === 0 ? (
@@ -326,10 +542,10 @@ export function InvoiceSaleModal(props: {
             disabled={busy}
             className="flex-1 rounded-xl border border-white/15 py-3 font-bold text-neutral-300 disabled:opacity-40"
 
-            onClick={props.onCancel}
+            onClick={onCancel}
           >
 
-            Abbrechen
+            ← Zurück zur Kasse
           </button>
 
           <button
@@ -339,7 +555,7 @@ export function InvoiceSaleModal(props: {
             disabled={
               busy ||
 
-              props.cartLines.length === 0 ||
+              cartLines.length === 0 ||
 
               !teamId ||
 

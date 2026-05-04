@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/database'
 import { formatMoney } from '../lib/format'
@@ -7,6 +8,19 @@ export function CardPaymentModal(props: {
   onCancel: () => void
   onConfirmSuccess: () => void | Promise<void>
 }) {
+  const { totalCents, onCancel, onConfirmSuccess } = props
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
   const note = useLiveQuery(
     () => db.settings.where('key').equals('sumupNote').first(),
     [],
@@ -26,14 +40,15 @@ export function CardPaymentModal(props: {
         <p className="mt-2 text-sm font-semibold text-neutral-400">
           Eine direkte Schnittstellen-Anbindung ist im Browser meist nicht
           verfügbar. Bitte Betrag in SumUp (oder vergleichbare App) eingeben und
-          Zahlung am Kartenterminal durchführen.
+          Zahlung am Kartenterminal durchführen. Esc oder „Zurück“ schließt ohne
+          Verbuchen.
         </p>
         <div className="mt-6 rounded-2xl border-2 border-[#FFD700]/50 bg-black/60 px-4 py-5 text-center shadow-[0_0_24px_rgba(255,215,0,0.12)]">
           <div className="text-sm font-bold uppercase tracking-wider text-neutral-400">
             Zu zahlen
           </div>
           <div className="mt-1 text-4xl font-black text-[#FFD700]">
-            {formatMoney(props.totalCents)}
+            {formatMoney(totalCents)}
           </div>
         </div>
         {note?.value != null && note.value !== '' && (
@@ -45,14 +60,14 @@ export function CardPaymentModal(props: {
           <button
             type="button"
             className="rounded-xl border border-neutral-600 bg-neutral-900 px-4 py-3 font-bold text-neutral-200 hover:border-[#FFD700]/40"
-            onClick={props.onCancel}
+            onClick={onCancel}
           >
-            Abbrechen
+            ← Zurück zur Kasse
           </button>
           <button
             type="button"
             className="rounded-xl border-2 border-[#ff003c] bg-red-950/40 px-4 py-3 font-black text-white shadow-[0_0_24px_rgba(255,0,60,0.25)] hover:bg-red-950/60"
-            onClick={() => void props.onConfirmSuccess()}
+            onClick={() => void onConfirmSuccess()}
           >
             Kartenzahlung erfolgreich
           </button>

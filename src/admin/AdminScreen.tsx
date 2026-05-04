@@ -161,6 +161,9 @@ function ProductEditor(props: {
     existing?.categoryId ?? catList[0]?.id ?? '',
   )
   const [active, setActive] = useState(existing?.active ?? true)
+  const [imageUrl, setImageUrl] = useState(
+    (existing?.imageUrl ?? '').trim(),
+  )
 
   const save = useCallback(async () => {
     const euros = parseFloat(priceStr.replace(',', '.'))
@@ -176,6 +179,9 @@ function ProductEditor(props: {
         priceCents,
         active,
         sortOrder: max + 10,
+        ...(imageUrl.trim() ?
+          { imageUrl: imageUrl.trim() }
+        : {}),
       })
     } else if (existing) {
       await db.products.update(existing.id, {
@@ -183,10 +189,20 @@ function ProductEditor(props: {
         categoryId,
         priceCents,
         active,
+        imageUrl: imageUrl.trim() ? imageUrl.trim() : null,
       })
     }
     onClose()
-  }, [active, categoryId, existing, isNew, name, priceStr, onClose])
+  }, [
+    active,
+    categoryId,
+    existing,
+    imageUrl,
+    isNew,
+    name,
+    priceStr,
+    onClose,
+  ])
 
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
@@ -219,6 +235,15 @@ function ProductEditor(props: {
             </option>
           ))}
         </select>
+        <label className="mt-3 block text-sm text-slate-400">
+          Bild‑URL (optional, leer = Standard nach Artikel‑ID oder Emoji)
+        </label>
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 font-mono text-sm text-white placeholder:text-slate-600"
+          placeholder="/assets/products/wasser.png"
+          value={imageUrl}
+          onChange={(e) => setImageUrl(e.target.value)}
+        />
         <label className="mt-4 flex items-center gap-2 text-slate-200">
           <input
             type="checkbox"

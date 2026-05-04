@@ -128,6 +128,12 @@ export function PosScreen({
                     : row.stock_min == null
                       ? null
                       : Number(row.stock_min),
+                imageUrl:
+                  row.imageUrl != null ?
+                    String(row.imageUrl)
+                  : row.image_url != null ?
+                    String(row.image_url)
+                  : undefined,
               }
             })
           : []
@@ -196,7 +202,24 @@ export function PosScreen({
   const [tapId, setTapId] = useState<string | null>(null)
   const [cardOpen, setCardOpen] = useState(false)
   const [cashOpen, setCashOpen] = useState(false)
+  /** Offline: vor Bar-Flow mit Bon vs. Nur-Abschluss ohne Bondruck */
+  const [offlineCashVariant, setOfflineCashVariant] = useState<
+    'withBon' | 'noBon' | null
+  >(null)
   const [invoiceOpen, setInvoiceOpen] = useState(false)
+
+  const openCashModal = useCallback(
+    (offlineWhenLocal: 'withBon' | 'noBon') => {
+      setOfflineCashVariant(remoteMode ? null : offlineWhenLocal)
+      setCashOpen(true)
+    },
+    [remoteMode],
+  )
+
+  const closeCashModal = useCallback(() => {
+    setCashOpen(false)
+    setOfflineCashVariant(null)
+  }, [])
   const [toast, setToast] = useState<string | null>(null)
   const [printBusy, setPrintBusy] = useState(false)
   const [syncingOutbox, setSyncingOutbox] = useState(false)
@@ -317,7 +340,11 @@ export function PosScreen({
 
   /** Abschluss: lokal IndexedDB oder API */
   const settleAndPrint = useCallback(
-    async (method: PaymentMethod, apiPay?: ApiPaymentBody) => {
+    async (
+      method: PaymentMethod,
+      apiPay?: ApiPaymentBody,
+      opts?: { offlineSkipReceiptPrint?: boolean },
+    ) => {
       if (cart.length === 0 || total <= 0) return
       const snap = [...cart]
       try {
@@ -344,9 +371,19 @@ export function PosScreen({
         } else {
           const { receiptNo, createdAt } = await saveSale(snap, method)
           setCart([])
-          const payload = await buildPayload(snap, method, receiptNo, createdAt)
-          await printPayload(payload)
-          showToast(method === 'cash' ? 'Barzahlung verbucht.' : 'Kartenzahlung verbucht.')
+          const skipPrint =
+            opts?.offlineSkipReceiptPrint === true && method === 'cash'
+          if (!skipPrint) {
+            const payload = await buildPayload(snap, method, receiptNo, createdAt)
+            await printPayload(payload)
+          }
+          showToast(
+            method === 'cash'
+              ? skipPrint
+                ? 'Verbucht.'
+                : 'Barzahlung verbucht.'
+              : 'Kartenzahlung verbucht.',
+          )
         }
       } catch (e) {
         if (remoteMode && apiPay) {
@@ -398,31 +435,15 @@ export function PosScreen({
 
   useEffect(() => {
     if (!remoteMode) return
-    void syncOutbox()
+    queueMicrotask(() => {
+      void syncOutbox()
+    })
     const onOnline = () => {
       void syncOutbox()
     }
     window.addEventListener('online', onOnline)
     return () => window.removeEventListener('online', onOnline)
   }, [remoteMode, syncOutbox])
-
-  const barMitBonOffline = useCallback(async () => {
-    if (cart.length === 0 || total <= 0) return
-    const snap = [...cart]
-    const { receiptNo, createdAt } = await saveSale(snap, 'cash')
-    setCart([])
-    const payload = await buildPayload(snap, 'cash', receiptNo, createdAt)
-    await printPayload(payload)
-    showToast('Barzahlung verbucht.', 2400)
-  }, [cart, total, buildPayload, printPayload])
-
-  const verkaufCashOhneBonOffline = useCallback(async () => {
-    if (cart.length === 0 || total <= 0) return
-    const snap = [...cart]
-    await saveSale(snap, 'cash')
-    setCart([])
-    showToast('Verbucht.')
-  }, [cart, total])
 
   const handlePrintDraft = useCallback(async () => {
     if (cart.length === 0) {
@@ -476,11 +497,7 @@ export function PosScreen({
       if (e.key === 'F12') {
         e.preventDefault()
         if (cart.length === 0 || printBusy) return
-        if (remoteMode) {
-          setCashOpen(true)
-        } else {
-          void barMitBonOffline()
-        }
+        openCashModal('withBon')
       } else if (e.key === 'F11') {
         e.preventDefault()
         if (cart.length > 0) setCardOpen(true)
@@ -490,11 +507,7 @@ export function PosScreen({
       } else if (e.key === 'Enter') {
         e.preventDefault()
         if (cart.length === 0) return
-        if (remoteMode) {
-          setCashOpen(true)
-        } else {
-          void verkaufCashOhneBonOffline()
-        }
+        openCashModal('noBon')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -504,8 +517,7 @@ export function PosScreen({
     cart.length,
     printBusy,
     remoteMode,
-    barMitBonOffline,
-    verkaufCashOhneBonOffline,
+    openCashModal,
     handlePrintDraft,
     undoLast,
   ])
@@ -594,40 +606,46 @@ export function PosScreen({
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-[#ff003c]/25 bg-neutral-950/80 p-3 shadow-[inset_0_0_40px_rgba(0,0,0,0.6)]">
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-              {products.map((p) => (
-                (() => {
-                  const soldOut = Boolean(p.stockTracking && Number(p.stockQty ?? 0) <= 0)
-                  return (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={soldOut}
-                  onClick={() => addProduct(p.id, p.name, p.priceCents)}
-                  className={[
-                    'flex min-h-[104px] w-full overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98]',
-                    'shadow-[0_0_22px_rgba(255,0,60,0.35)] hover:shadow-[0_0_32px_rgba(255,0,60,0.5)]',
-                    soldOut ? 'opacity-50 grayscale' : '',
-                    tapId === p.id ? 'animate-tap' : '',
-                  ].join(' ')}
-                >
-                  <ProductVisual name={p.name} categoryId={p.categoryId} />
-                  <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-3 py-2">
-                    {soldOut && (
-                      <span className="text-xs font-black uppercase tracking-wider text-red-400">
-                        AUSVERKAUFT
+              {products.map((p) => {
+                const soldOut = Boolean(
+                  p.stockTracking && Number(p.stockQty ?? 0) <= 0,
+                )
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    disabled={soldOut}
+                    onClick={() => addProduct(p.id, p.name, p.priceCents)}
+                    className={[
+                      'flex min-h-[104px] w-full overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98]',
+                      'shadow-[0_0_22px_rgba(255,0,60,0.35)] hover:shadow-[0_0_32px_rgba(255,0,60,0.5)]',
+                      soldOut ? 'opacity-50 grayscale' : '',
+                      tapId === p.id ? 'animate-tap' : '',
+                    ].join(' ')}
+                  >
+                    <ProductVisual
+                      key={`${p.id}:${p.imageUrl ?? ''}`}
+                      productId={p.id}
+                      name={p.name}
+                      categoryId={p.categoryId}
+                      imageUrl={p.imageUrl}
+                    />
+                    <div className="flex min-w-0 flex-1 flex-col justify-center gap-1 px-3 py-2">
+                      {soldOut && (
+                        <span className="text-xs font-black uppercase tracking-wider text-red-400">
+                          AUSVERKAUFT
+                        </span>
+                      )}
+                      <span className="text-base font-bold leading-tight text-white md:text-lg">
+                        {p.name}
                       </span>
-                    )}
-                    <span className="text-base font-bold leading-tight text-white md:text-lg">
-                      {p.name}
-                    </span>
-                    <span className="text-lg font-black text-[#FFD700] md:text-xl">
-                      {formatMoney(p.priceCents)}
-                    </span>
-                  </div>
-                </button>
-                  )
-                })()
-              ))}
+                      <span className="text-lg font-black text-[#FFD700] md:text-xl">
+                        {formatMoney(p.priceCents)}
+                      </span>
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </div>
         </section>
@@ -743,10 +761,7 @@ export function PosScreen({
           <button
             type="button"
             disabled={cart.length === 0 || printBusy}
-            onClick={() => {
-              if (remoteMode) setCashOpen(true)
-              else void barMitBonOffline()
-            }}
+            onClick={() => openCashModal('withBon')}
             className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-[#ff003c] bg-red-950/30 px-4 py-2 text-lg font-black uppercase text-white shadow-[0_0_24px_rgba(255,0,60,0.25)] transition enabled:hover:bg-red-950/50 disabled:opacity-35"
           >
             Barzahlung
@@ -782,9 +797,7 @@ export function PosScreen({
           <button
             type="button"
             disabled={cart.length === 0}
-            onClick={() =>
-              remoteMode ? setCashOpen(true) : void verkaufCashOhneBonOffline()
-            }
+            onClick={() => openCashModal('noBon')}
             className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-[#FFD700] bg-gradient-to-b from-[#8a7500]/40 to-black px-4 py-2 text-xl font-black uppercase text-[#FFD700] shadow-[0_0_28px_rgba(255,215,0,0.35)] transition enabled:hover:brightness-110 disabled:opacity-35"
           >
             <span className="text-2xl leading-none">✓</span>
@@ -856,12 +869,18 @@ export function PosScreen({
         </div>
       </footer>
 
-      {cashOpen && remoteMode && (
+      {cashOpen && (
         <CashTenderModal
+          subtitleHint={
+            !remoteMode && offlineCashVariant === 'noBon'
+              ? 'Lokaler Schnell‑Abschluss: wie früher mit Enter/Taste ✓ — nach „Verbuchen“ ohne automatischen Bondruck.'
+              : undefined
+          }
           totalCents={total}
-          onCancel={() => setCashOpen(false)}
+          onCancel={closeCashModal}
           onConfirm={async (given) => {
-            setCashOpen(false)
+            const skipBon = offlineCashVariant === 'noBon'
+            closeCashModal()
             if (given < total) {
               showToast('Gegeben zu niedrig.')
               return
@@ -870,7 +889,16 @@ export function PosScreen({
             const change = given - total
             showToast(`Rückgeld: ${formatMoney(change)}`, 2400)
 
-            await settleAndPrint('cash', { method: 'cash', amountTenderedCents: given })
+            if (remoteMode) {
+              await settleAndPrint('cash', {
+                method: 'cash',
+                amountTenderedCents: given,
+              })
+            } else {
+              await settleAndPrint('cash', undefined, {
+                offlineSkipReceiptPrint: skipBon,
+              })
+            }
           }}
         />
       )}

@@ -112,6 +112,22 @@ export function TeamsBilling() {
 
   const [qa, setQa] = useState('')
 
+  const [qContact, setQContact] = useState('')
+
+  const [qPhone, setQPhone] = useState('')
+
+  const [qDays, setQDays] = useState('14')
+
+  const [qCustomerNo, setQCustomerNo] = useState('')
+
+  const [qInternal, setQInternal] = useState('')
+
+  const [qCc, setQCc] = useState('')
+
+  const [qDept, setQDept] = useState('')
+
+  const [qLocal, setQLocal] = useState('')
+
 
 
 
@@ -334,6 +350,10 @@ export function TeamsBilling() {
 
 
 
+    const pd = Number.parseInt(qDays.trim(), 10)
+    const defaultPaymentDays =
+      Number.isFinite(pd) && pd > 0 ? pd : 14
+
     await apiJson(`/teams`, {
 
 
@@ -343,19 +363,27 @@ export function TeamsBilling() {
 
 
       body: JSON.stringify({
-
-
         name: qn.trim(),
-
 
         invoiceEmail: qe.trim(),
 
+        contactName: qContact.trim(),
 
-
+        phone: qPhone.trim(),
 
         billingAddress: qa.trim(),
 
+        defaultPaymentDays,
 
+        ...(qCustomerNo.trim() ? { customerNo: qCustomerNo.trim() } : {}),
+
+        ...(qInternal.trim() ? { internalNote: qInternal.trim() } : {}),
+
+        ...(qCc.trim() ? { costCenter: qCc.trim() } : {}),
+
+        ...(qDept.trim() ? { department: qDept.trim() } : {}),
+
+        ...(qLocal.trim() ? { localGroup: qLocal.trim() } : {}),
       }),
 
 
@@ -366,9 +394,15 @@ export function TeamsBilling() {
 
     setQn('')
     setQe('')
-
-
     setQa('')
+    setQContact('')
+    setQPhone('')
+    setQDays('14')
+    setQCustomerNo('')
+    setQInternal('')
+    setQCc('')
+    setQDept('')
+    setQLocal('')
 
 
     await load()
@@ -626,105 +660,26 @@ export function TeamsBilling() {
 
 
 
-          <div className="mt-3 grid gap-2 md:grid-cols-[2fr_2fr_2fr_auto]">
-
-
-
-            <input
-
-
-              placeholder="Name *"
-
-
-
-
-              className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2"
-
-
-              value={qn}
-
-
-
-
-              onChange={(e) => setQn(e.target.value)}
-            />
-
-
-
-            <input
-
-
-
-              placeholder="Rechnungs‑E‑Mail"
-
-
-              className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2"
-
-
-              value={qe}
-
-
-
-              onChange={(e) => setQe(e.target.value)}
-
-
-
-
-            />
-
-
-
-            <input
-
-
-
-              placeholder="Rechnungsanschrift"
-
-
-              className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2"
-
-
-              value={qa}
-
-
-              onChange={(e) => setQa(e.target.value)}
-            />
-
-
-
-            <button
-
-
-
-              type="button"
-
-
-
-
-              className="rounded-lg bg-blue-900/70 px-4 py-2 font-bold text-white disabled:opacity-40"
-
-
-              disabled={!qn.trim()}
-
-
-              onClick={() => void quickTeam()}
-
-
-
-
-            >
-              Anlegen
-
-
-
-
+          <p className="mt-2 text-xs text-neutral-400">
+            Stammdaten werden in der Datenbank gespeichert und stehen später in der Kasse unter „Auf Rechnung“ zur Auswahl.
+          </p>
+
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <input placeholder="Name *" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qn} onChange={(e) => setQn(e.target.value)} />
+            <input type="email" placeholder="Rechnungs‑E‑Mail" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qe} onChange={(e) => setQe(e.target.value)} />
+            <input placeholder="Telefon" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qPhone} onChange={(e) => setQPhone(e.target.value)} />
+            <input placeholder="Ansprechpartner/in" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qContact} onChange={(e) => setQContact(e.target.value)} />
+            <textarea placeholder="Rechnungsanschrift" rows={2} className="resize-y rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qa} onChange={(e) => setQa(e.target.value)} />
+            <input inputMode="numeric" placeholder="Zahlungsziel (Tage)" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qDays} onChange={(e) => setQDays(e.target.value)} />
+            <input placeholder="Kunden‑Nr." className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qCustomerNo} onChange={(e) => setQCustomerNo(e.target.value)} />
+            <input placeholder="Kostenstelle" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qCc} onChange={(e) => setQCc(e.target.value)} />
+            <input placeholder="Abteilung" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2" value={qDept} onChange={(e) => setQDept(e.target.value)} />
+            <input placeholder="Ortsgruppe" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qLocal} onChange={(e) => setQLocal(e.target.value)} />
+            <input placeholder="Interne Notiz" className="rounded-lg border border-white/15 bg-neutral-950 px-3 py-2 md:col-span-2" value={qInternal} onChange={(e) => setQInternal(e.target.value)} />
+            <button type="button" className="rounded-lg bg-blue-900/70 px-4 py-2 font-bold text-white disabled:opacity-40 md:col-span-2" disabled={!qn.trim()} onClick={() => void quickTeam()}>
+              Team anlegen
             </button>
-
-
-
-
           </div>
-
 
 
 

@@ -21,6 +21,8 @@ export interface ProductRow {
   priceCents: number
   active: boolean
   sortOrder: number
+  /** z.B. `/assets/products/wasser.png`; leer: Emoji oder Dateiname aus Artikel-ID */
+  imageUrl?: string | null
   stockTracking?: boolean
   stockQty?: number | null
   stockMin?: number | null
