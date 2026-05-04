@@ -7,11 +7,13 @@ import { appendAudit } from '../audit.js'
 import type { JwtUser } from '../types.js'
 import { nextInvoiceNo } from './numbers.js'
 import {
+  formatReceiptBonLabel,
   writeCollectiveInvoicePdf,
   type AggregatedInvoiceLine,
+  type InvoicePdfDetailLine,
   type IssuerBlock,
 } from './pdfInvoice.js'
-import { getIssuer, getTaxSettings } from './issuer.js'
+import { getIssuer, getOrgName, getTaxSettings } from './issuer.js'
 
 export interface SmtpConfig {
   smtpHost: string
@@ -100,6 +102,7 @@ export function listOpenSalesDetail(
     .prepare(
       `SELECT s.id as saleId, s.created_at as createdAt, s.receipt_no as receiptNo,
         s.day_key as dayKey, u.username as cashier, s.payment_method as paymentMethod,
+        s.cashier_note as cashierNote,
         s.invoice_state as invoiceState, s.is_stornoed as isStornoed,
         s.receipt_pdf_rel_path as receiptPdfRelPath,
         sl.id as lineId, sl.product_id as productId, sl.name as articleName,
@@ -127,6 +130,7 @@ export function listOpenSalesDetail(
         receiptNo: row.receiptNo,
         dayKey: row.dayKey,
         cashier: row.cashier,
+        cashierNote: row.cashierNote,
         paymentMethod: row.paymentMethod,
         invoiceState: row.invoiceState,
         isStornoed: row.isStornoed,
@@ -199,6 +203,68 @@ function summarizeOpenSales(db: BetterSqlite3.Database, teamId: string, eventId:
   return { aggLines: agg, receipts: saleRows }
 }
 
+/** Alle Einzelpositionen für PDF (offene Rechnungsverkäufe eines Team/Event). */
+export function listOpenSaleLineDetails(
+  db: BetterSqlite3.Database,
+  teamId: string,
+  eventId: string,
+): InvoicePdfDetailLine[] {
+  const rows = db
+    .prepare(
+      `SELECT s.created_at AS createdAt,
+        s.receipt_no AS receiptNo,
+        s.cashier_note AS cashierNote,
+        COALESCE(NULLIF(TRIM(s.cashier_name_snapshot), ''), u.username, '') AS cashierName,
+        sl.name AS articleName, sl.qty AS qty,
+        sl.unit_price_cents AS unitPriceCents, sl.line_total_cents AS lineTotalCents
+      FROM sales s
+      JOIN sale_lines sl ON sl.sale_id = s.id
+      LEFT JOIN users u ON u.id = s.cashier_user_id
+      WHERE s.team_id = ? AND s.event_id = ?
+        AND s.payment_method = 'invoice'
+        AND s.invoice_state = 'open_for_invoicing'
+        AND COALESCE(s.is_stornoed, 0) = 0
+      ORDER BY s.created_at ASC, s.id ASC, sl.id ASC`,
+    )
+    .all(teamId, eventId) as Array<{
+    createdAt: number
+    receiptNo: number
+    cashierNote: string | null
+    cashierName: string
+    articleName: string
+    qty: number
+    unitPriceCents: number
+    lineTotalCents: number
+  }>
+
+  return rows.map((r) => {
+    const createdAt = Number(r.createdAt)
+    const receiptNo = Number(r.receiptNo)
+    return {
+      createdAt,
+      receiptNo,
+      bonLabel: formatReceiptBonLabel(createdAt, receiptNo),
+      articleName: String(r.articleName),
+      qty: Number(r.qty),
+      unitPriceCents: Number(r.unitPriceCents),
+      lineTotalCents: Number(r.lineTotalCents),
+      cashier: r.cashierName?.trim() || undefined,
+      note: r.cashierNote?.trim() || undefined,
+    }
+  })
+}
+
+function buildRecipientAddressLines(teamRow: Record<string, unknown>): string[] {
+  const lines: string[] = []
+  if (teamRow.contact_name) lines.push(`Ansprechpartner: ${String(teamRow.contact_name)}`)
+  if (teamRow.customer_no) lines.push(`Kunden-Nr.: ${String(teamRow.customer_no)}`)
+  for (const part of String(teamRow.billing_address ?? '').split(/\r?\n/)) {
+    const t = part.trim()
+    if (t) lines.push(t)
+  }
+  return lines
+}
+
 /** Derive overdue from due date */
 export function deriveInvoiceFrontendStatus(inv: {
   status: string
@@ -248,6 +314,8 @@ export async function createCollectiveInvoice(opts: {
   const preview = summarizeOpenSales(opts.db, teamId, eventId)
   if (preview.aggLines.length === 0 || preview.receipts.length === 0)
     throw new Error('NO_OPEN_POSTS')
+
+  const detailForPdf = listOpenSaleLineDetails(opts.db, teamId, eventId)
 
   const total = preview.aggLines.reduce((s, l) => s + l.lineTotalCents, 0)
 
@@ -370,10 +438,12 @@ export async function createCollectiveInvoice(opts: {
       end: eventRow!.end_date,
     },
     issuer: built.issuerSnap,
-    recipientLines: built.recipientLines.join('\n').split('\n'),
+    recipientDisplayName: String(teamRow!.name ?? ''),
+    recipientAddressLines: buildRecipientAddressLines(teamRow as Record<string, unknown>),
     teamName: String(teamRow!.name ?? ''),
     eventName: eventRow!.name,
     lines: built.preview.aggLines,
+    detailLines: detailForPdf,
     vatNotes: vatHints(tax.taxMode, tax.taxNotice),
     totalCents: built.totalCents,
     paymentTermsDays: built.pdDays,
@@ -386,6 +456,9 @@ export async function createCollectiveInvoice(opts: {
       amountCents: r.totalCents,
     })),
     qrPayload,
+    invoiceStatusLabel: 'Offen',
+    isDemo: false,
+    orgDisplayName: getOrgName(opts.db),
   })
 
   opts.db.prepare(`UPDATE invoices SET pdf_rel_path = ?, status = ? WHERE id = ?`).run(
@@ -510,9 +583,16 @@ export async function stornoInvoice(opts: {
     return { nid, stNo, issuerSnap, agg: negative }
   })()
 
-  const recipientLinesRaw = typeof teamRow.billing_address === 'string'
-    ? `${teamRow.name}\n${teamRow.billing_address}`
-    : String(teamRow.name)
+  const stornoDetailLines: InvoicePdfDetailLine[] = built.agg.map((l, i) => ({
+    createdAt: Date.now(),
+    receiptNo: i,
+    bonLabel: '—',
+    articleName: l.name,
+    qty: l.qty,
+    unitPriceCents: l.unitPriceCents,
+    lineTotalCents: l.lineTotalCents,
+    note: 'Stornoposition',
+  }))
 
   const pdfRelPath = await writeCollectiveInvoicePdf({
     dataRoot: opts.dataRoot,
@@ -523,17 +603,22 @@ export async function stornoInvoice(opts: {
       end: String(inv.service_period_end),
     },
     issuer: built.issuerSnap,
-    recipientLines: recipientLinesRaw.split('\n').filter(Boolean),
+    recipientDisplayName: String(teamRow.name),
+    recipientAddressLines: buildRecipientAddressLines(teamRow as Record<string, unknown>),
     teamName: String(teamRow.name),
     eventName: String(eventRow.name),
     lines: built.agg,
-    vatNotes: [opts.reason],
+    detailLines: stornoDetailLines,
+    vatNotes: [`Grund: ${opts.reason}`],
     totalCents: totalNeg,
     paymentTermsDays: 0,
     dueDateISO: new Date().toISOString().slice(0, 10),
     purposeReference: built.stNo,
     isStorno: true,
     referencesInvoiceNo: String(inv.invoice_no),
+    invoiceStatusLabel: 'Storno',
+    isDemo: false,
+    orgDisplayName: getOrgName(opts.db),
   })
 
   opts.db.prepare(`UPDATE invoices SET pdf_rel_path = ?, status = ? WHERE id = ?`).run(

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { jsPDF } from 'jspdf'
 import { apiBlob, apiJson } from '../api/http'
 import { getStoredRole, getStoredToken } from '../api/config'
 import { formatDateTime, formatMoney } from '../lib/format'
@@ -14,6 +13,14 @@ import {
   useDemoSales,
   useDemoTeams,
 } from '../demo/demoStore'
+import { demoCollectivePdfFilename, generateDemoCollectiveInvoicePdf } from '../lib/collectiveInvoicePdf'
+import { generateOpenTeamInvoiceDetailPdf } from './openTeamInvoiceDetailPdf'
+import {
+  buildTeamInvoiceDetailsFromApi,
+  buildTeamInvoiceDetailsFromDemo,
+  type TeamInvoiceDetailsModel,
+} from './teamInvoiceDetailsModel'
+import { TeamInvoiceDetailsView } from './TeamInvoiceDetailsView'
 
 type ApiRow = Record<string, unknown>
 
@@ -88,11 +95,16 @@ export function TeamsBilling() {
   const [info, setInfo] = useState<string | null>(null)
 
 
-  const [detailPick, setDetailPick] = useState<{ tid: string; eid: string } | null>(null)
+  const [detailPick, setDetailPick] = useState<{
+    tid: string
+    eid: string
+    teamName: string
+    eventName: string
+  } | null>(null)
 
-
-
-  const [detailJson, setDetailJson] = useState<string>('')
+  const [detailModel, setDetailModel] = useState<TeamInvoiceDetailsModel | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
 
 
   const [payInv, setPayInv] = useState<string | null>(null)
@@ -304,36 +316,56 @@ export function TeamsBilling() {
 
 
 
-  async function openDetail(teamId: string, eventId: string) {
-    setDetailPick({ tid: teamId, eid: eventId })
+  function closeDetailPanel() {
+    setDetailPick(null)
+    setDetailModel(null)
+    setDetailError(null)
+    setDetailLoading(false)
+  }
 
-    if (demoMode) {
-      const rows = demoSales.filter(
-        (s) =>
-          s.paymentMethod === 'invoice' &&
-          s.teamId === teamId &&
-          s.eventId === eventId &&
-          !s.demoInvoiceAllocationId,
-      )
-      setDetailJson(
-        JSON.stringify(
-          rows.map((s) => ({
-            bonNumber: s.bonNumberLabel,
-            createdAt: s.createdAt,
-            totalCents: s.totalCents,
-            lines: s.lines,
-            contactName: s.contactName,
-            note: s.note,
-          })),
-          null,
-          2,
-        ),
-      )
-      return
+  async function openDetail(
+    teamId: string,
+    eventId: string,
+    teamName: string,
+    eventName: string,
+  ) {
+    setDetailPick({ tid: teamId, eid: eventId, teamName, eventName })
+    setDetailLoading(true)
+    setDetailError(null)
+    setDetailModel(null)
+    try {
+      if (demoMode) {
+        const rows = demoSales.filter(
+          (s) =>
+            s.paymentMethod === 'invoice' &&
+            s.teamId === teamId &&
+            s.eventId === eventId &&
+            !s.demoInvoiceAllocationId,
+        )
+        setDetailModel(buildTeamInvoiceDetailsFromDemo(rows, teamName, eventName))
+      } else {
+        const rows = await apiJson<unknown[]>(
+          `/teams/${teamId}/open-sales?eventId=${eventId}`,
+        )
+        setDetailModel(buildTeamInvoiceDetailsFromApi(rows, teamName, eventName))
+      }
+    } catch (e) {
+      setDetailError(String((e as Error).message ?? e))
+    } finally {
+      setDetailLoading(false)
     }
+  }
 
-    const rows = await apiJson(`/teams/${teamId}/open-sales?eventId=${eventId}`)
-    setDetailJson(JSON.stringify(rows, null, 2))
+  function downloadOpenDetailPdf() {
+    if (!detailModel || !detailPick) return
+    const blob = generateOpenTeamInvoiceDetailPdf(detailModel)
+    const safe = detailPick.teamName
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48)
+    saveBlob(blob, `Offene-Teamrechnung-${safe || 'Team'}.pdf`)
   }
 
 
@@ -349,6 +381,7 @@ export function TeamsBilling() {
         `DEMO: Sammelrechnung ${inv.invoice_no} erstellt (${formatMoney(inv.total_cents)}).`,
       )
       await load()
+      closeDetailPanel()
       return
     }
 
@@ -393,6 +426,7 @@ export function TeamsBilling() {
 
 
     await load()
+    closeDetailPanel()
 
 
 
@@ -410,17 +444,10 @@ export function TeamsBilling() {
         setInfo('DEMO: Rechnung nicht gefunden.')
         return
       }
-      const doc = new jsPDF({ unit: 'mm', format: 'a4' })
-      doc.setFontSize(16)
-      doc.text('DLRG Kasse – DEMO-Rechnung', 20, 24)
-      doc.setFontSize(11)
-      doc.text(`Nr. ${no}`, 20, 34)
-      doc.text(`Team: ${inv.teamName}`, 20, 42)
-      doc.text(`Veranstaltung: ${inv.eventName}`, 20, 49)
-      doc.text(`Betrag: ${formatMoney(inv.total_cents)}`, 20, 56)
-      doc.text('Hinweis: Nur Simulation, keine steuerliche Relevanz.', 20, 68)
-      const safeNo = no.replace(/[^a-zA-Z0-9_-]/g, '_')
-      doc.save(`demo-rechnung-${safeNo}.pdf`)
+      const team = demoTeams.find((t) => t.id === inv.teamId)
+      const sales = demoSales.filter((s) => s.demoInvoiceAllocationId === inv.id)
+      const blob = generateDemoCollectiveInvoicePdf(inv, sales, team, undefined)
+      saveBlob(blob, demoCollectivePdfFilename(inv))
       setInfo('DEMO: PDF heruntergeladen.')
       return
     }
@@ -980,7 +1007,7 @@ export function TeamsBilling() {
                           className="rounded-lg border border-cyan-500/40 px-3 py-1 text-[10px] font-bold uppercase text-cyan-200"
 
 
-                          onClick={() => void openDetail(tid, eid)}
+                          onClick={() => void openDetail(tid, eid, tnm, enm)}
 
 
 
@@ -1069,78 +1096,21 @@ export function TeamsBilling() {
 
 
       {/* detail */}
-      {detailPick && detailJson ? (
-
-
-
-
-        <div className="rounded-xl border border-cyan-500/30 bg-neutral-950/60 p-4">
-
-
-
-
-
-          <button
-
-
-
-
-
-
-            type="button"
-
-
-
-
-            className="float-right text-xs text-neutral-500"
-
-
-            onClick={() => {
-
-
-              setDetailPick(null)
-
-
-              setDetailJson('')
-
-
+      {detailPick ? (
+        <section className="mt-8">
+          <TeamInvoiceDetailsView
+            model={detailModel}
+            loading={detailLoading}
+            error={detailError}
+            canCollectiveInvoice={allowBillingAdmin}
+            onClose={closeDetailPanel}
+            onCollectiveInvoice={() => {
+              if (!detailPick) return
+              void collective(detailPick.tid, detailPick.eid)
             }}
-
-
-
-
-          >
-
-
-
-
-            schließen
-
-
-
-          </button>
-
-
-
-          <pre className="mt-10 max-h-96 overflow-auto text-[11px] text-neutral-200">
-
-
-
-            {detailJson}
-
-
-
-
-
-
-          </pre>
-
-
-
-        </div>
-
-
-
+            onDownloadPdf={detailModel ? downloadOpenDetailPdf : undefined}
+          />
+        </section>
       ) : null}
 
 
