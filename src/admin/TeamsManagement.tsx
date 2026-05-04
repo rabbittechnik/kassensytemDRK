@@ -399,7 +399,11 @@ export function TeamsManagement(props: { onTeamsChanged: () => void }) {
         <div className="rounded-xl border border-cyan-500/30 bg-black/40 p-5 shadow-[0_0_40px_rgba(6,182,212,0.12)]">
           <p className="text-sm font-semibold text-cyan-100">API-Anmeldung</p>
           <p className="mt-1 text-xs text-neutral-400">
-            Backend nicht erreichbar oder nicht angemeldet. Bitte API-Verbindung prüfen — Ziel z. B.{' '}
+            Melden Sie sich mit Benutzer <code className="text-cyan-200">admin</code> und der
+            API-PIN an. Auf Railway nutzt die Kasse standardmässig dieselbe Adresse wie die
+            Seite; die API liegt unter dem Pfad{' '}
+            <code className="text-cyan-200">/api</code> (keine separate VITE-URL nötig).
+            Health-Check:{' '}
             <code className="text-cyan-200">{describeApiReachability('/health')}</code>
           </p>
           <div className="mt-4 grid max-w-md gap-3 md:grid-cols-2">

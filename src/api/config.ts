@@ -2,18 +2,20 @@ const STORAGE_KEY = 'drk-kasse-jwt'
 export const STORAGE_ROLE_KEY = 'drk-kasse-role'
 
 /**
- * Basis-URL für API-Aufrufe (Vite blendet `VITE_API_BASE_URL` beim Build ein).
- * Ist nichts gesetzt, wird `/api` verwendet (gleiche Origin wie das Frontend, z. B. Railway mit `API_MOUNT_PATH=/api`).
+ * Basis für alle API-Aufrufe (`apiFetch` / `apiJson` / `login`).
+ * Railway (Frontend + API gleicher Host): `VITE_API_BASE_URL=/api` setzen oder weglassen
+ * (Default ist `/api`). Pfade werden dann z. B. zu `fetch("/api/teams")` aufgelöst.
  */
+export const API_BASE_URL =
+  String(import.meta.env.VITE_API_BASE_URL ?? '').trim() || '/api'
+
+/** Normalisierte Basis ohne trailing slash (nie leer; mindestens `/api`). */
 export function apiBaseUrl(): string {
-  const raw = import.meta.env.VITE_API_BASE_URL
-  if (raw === undefined || raw === null) return '/api'
-  const t = String(raw).trim()
-  if (t === '') return '/api'
-  return t.replace(/\/$/, '')
+  const t = API_BASE_URL.replace(/\/$/, '')
+  return t || '/api'
 }
 
-/** true, sobald relative oder absolute API-Basis vorliegt (Standard ist immer `/api`). */
+/** true, wenn eine API-Basis gesetzt ist (Standard immer `/api` → immer true). */
 export function hasApi(): boolean {
   return Boolean(apiBaseUrl())
 }

@@ -18,12 +18,16 @@ export class ApiError extends Error {
   }
 }
 
-/** Vollständige URL oder Pfad relativ zur aktuellen Seite (z. B. `/teams` mit Basis `/api` → `/api/teams`). */
+/**
+ * Baut die Request-URL: `resolveApiUrl("/teams")` mit Basis `/api` → `/api/teams`.
+ * Wenn `path` bereits mit der Basis beginnt (z. B. fälschlich `/api/teams`), wird nicht
+ * verdoppelt → weiterhin `/api/teams`.
+ */
 export function resolveApiUrl(path: string): string {
-  const base = apiBaseUrl()
+  const b = apiBaseUrl().replace(/\/$/, '')
   const rel = path.startsWith('/') ? path : `/${path}`
-  const b = base.replace(/\/$/, '')
   if (!b) return rel
+  if (b.startsWith('/') && (rel === b || rel.startsWith(`${b}/`))) return rel
   if (b.startsWith('/')) return `${b}${rel}`
   return `${b}${rel}`
 }
@@ -74,7 +78,7 @@ export async function apiFetch(path: string, init: ApiFetchInit = {}): Promise<R
         ? `${window.location.origin}${url}`
         : url
     const hint =
-      ' Prüfen Sie: Server läuft, Railway-URL/API-Pfad (/api?), CORS, Netzwerk, und ob Vite mit demselben Basis-Pfad gebaut wurde (Variable bei Railway vor dem Build setzen).'
+      ' Prüfen Sie: Server läuft, API unter gleicher Origin (z. B. /api), Backend-Env API_MOUNT_PATH=/api, CORS, Netzwerk. Bei Railway: VITE_API_BASE_URL=/api vor dem Frontend-Build setzen oder leer lassen (Default /api).'
     const msg = `Die API unter «${where}» ist nicht erreichbar.${hint}`
     throw new ApiError(msg, 0, undefined, { cause })
   }

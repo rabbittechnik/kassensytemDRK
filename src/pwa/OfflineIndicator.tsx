@@ -6,7 +6,7 @@ import { hasApi } from '../api/config'
  * Offline-Indikator als Fixed-Banner unten am Bildschirm.
  * Quelle:
  *  - `navigator.onLine` und `online`/`offline`-Events fuer Geraete-Status
- *  - Heartbeat alle 20 s gegen `/health` fuer Backend-Erreichbarkeit
+ *  - Heartbeat alle 20 s gegen `/health` (über apiFetch → z. B. `/api/health` auf Railway)
  * Banner-Text: "Offline - Backend nicht erreichbar".
  *
  * Beeinflusst keine Kassendaten; reine Status-Visualisierung.
@@ -52,8 +52,7 @@ export function OfflineIndicator() {
 
   const apiKnown = hasApi()
   const showBanner = !online || (apiKnown && backendOk === false)
-  // Wenn keine API konfiguriert ist, zeigen wir nur den Geraete-Offline-Status.
-  // (apiKnown ist dann false, also greift backendOk-Logik nicht.)
+  // hasApi() ist mit Default-Basis `/api` immer true; Backend-Status kommt vom Heartbeat.
   if (!showBanner) return null
 
   const text = !online

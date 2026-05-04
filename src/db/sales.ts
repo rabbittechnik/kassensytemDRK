@@ -216,7 +216,7 @@ export async function saveSale(
 ): Promise<{ saleId: string; receiptNo: number; createdAt: number }> {
   if (paymentMethod === 'invoice') {
     throw new Error(
-      'Rechnungsverkäufe erfordern die Server-API (VITE_API_BASE_URL + Anmeldung).',
+      'Rechnungsverkäufe erfordern die Server-API und eine gültige API-Anmeldung.',
     )
   }
   const r = await completeLocalSaleWithDualReceipts(lines, paymentMethod)
