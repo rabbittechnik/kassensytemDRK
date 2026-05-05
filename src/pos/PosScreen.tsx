@@ -34,8 +34,8 @@ import { SuccessToast } from './SuccessToast'
 import { ProductVisual } from './productVisual'
 import { CashTenderModal } from './CashTenderModal'
 import { InvoiceSaleModal } from './InvoiceSaleModal'
-import { hasApi } from '../api/config'
-import { apiJson } from '../api/http'
+import { API_BASE_URL, apiBaseUrl, hasApi } from '../api/config'
+import { apiJson, resolveApiUrl } from '../api/http'
 import {
   apiCreateHelperConsumption,
   apiCreateSale,
@@ -431,6 +431,21 @@ export function PosScreen({
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperNote, setHelperNote] = useState('')
   const [helperBusy, setHelperBusy] = useState(false)
+  const [apiDiag, setApiDiag] = useState<{
+    baseSet: boolean
+    baseUrl: string
+    healthReachable: boolean
+    apiReachable: boolean
+    depositEndpointReachable: boolean
+    lastCheckedAt: number
+  }>({
+    baseSet: Boolean(String(API_BASE_URL ?? '').trim()),
+    baseUrl: apiBaseUrl(),
+    healthReachable: false,
+    apiReachable: false,
+    depositEndpointReachable: false,
+    lastCheckedAt: 0,
+  })
 
   const total = useMemo(() => cart.reduce((s, l) => s + l.priceCents * l.qty, 0), [cart])
   const saleAvailability = useMemo(
@@ -459,6 +474,45 @@ export function PosScreen({
     window.setTimeout(() => setToast(null), ms)
   }
 
+  const runApiDiagnostics = useCallback(async () => {
+    const base = apiBaseUrl()
+    const diag = {
+      baseSet: Boolean(base),
+      baseUrl: base,
+      healthReachable: false,
+      apiReachable: false,
+      depositEndpointReachable: false,
+      lastCheckedAt: Date.now(),
+    }
+    if (!diag.baseSet) {
+      setApiDiag(diag)
+      return diag
+    }
+    const checks = await Promise.allSettled([
+      fetch(resolveApiUrl('/health'), { method: 'GET' }),
+      fetch(base, { method: 'GET' }),
+      fetch(resolveApiUrl('/deposit-vouchers/DIAG-PING-000000'), { method: 'GET' }),
+    ])
+    const okish = (r: PromiseSettledResult<Response>) =>
+      r.status === 'fulfilled' && r.value.status > 0
+    diag.healthReachable = okish(checks[0])
+    diag.apiReachable = okish(checks[1])
+    diag.depositEndpointReachable = okish(checks[2])
+    setApiDiag(diag)
+    return diag
+  }, [])
+
+  useEffect(() => {
+    void runApiDiagnostics()
+    const t = window.setInterval(() => void runApiDiagnostics(), 20_000)
+    const onOnline = () => void runApiDiagnostics()
+    window.addEventListener('online', onOnline)
+    return () => {
+      window.clearInterval(t)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [runApiDiagnostics])
+
   const handlePwaUpdateCheck = useCallback(async () => {
     setPwaCheckBusy(true)
     try {
@@ -478,8 +532,39 @@ export function PosScreen({
   }, [checkForUpdate])
 
   const handleDepositRedeem = useCallback(async () => {
-    if (!remoteMode) {
-      showToast('Pfand-Einlösung ist in Phase 1 nur im API-/Online-Modus erlaubt.', 4200)
+    if (demoMode) {
+      const voucherNumber = window.prompt(
+        'Demo-Pfandbonnummer eingeben oder scannen (z. B. PF-2026-000124):',
+      )
+      if (!voucherNumber?.trim()) return
+      showToast(
+        `DEMO: Pfand-Auszahlung simuliert (${voucherNumber.trim().toUpperCase()}).`,
+        4200,
+      )
+      return
+    }
+    const diag = await runApiDiagnostics()
+    const apiConnected =
+      diag.healthReachable && diag.apiReachable && diag.depositEndpointReachable
+    if (!apiJwt) {
+      showToast(
+        'Die Kasse läuft aktuell im Offline-Modus. Pfand-Auszahlung ist nur im Servermodus möglich.',
+        5200,
+      )
+      return
+    }
+    if (!apiConnected) {
+      if (navigator.onLine) {
+        showToast(
+          'Internet ist vorhanden, aber der Kassen-Server ist nicht erreichbar. Pfand-Auszahlung ist deshalb gesperrt.',
+          6200,
+        )
+      } else {
+        showToast(
+          'Keine Serververbindung für Pfand-Auszahlung. Bitte Netzwerk und Kassen-Server prüfen.',
+          5200,
+        )
+      }
       return
     }
     const voucherNumber = window.prompt('Pfandbonnummer eingeben oder scannen (z. B. PF-2026-000124):')
@@ -493,7 +578,7 @@ export function PosScreen({
     } catch (e) {
       showToast(`Pfand-Einlösung fehlgeschlagen: ${String((e as Error).message ?? e)}`, 5000)
     }
-  }, [remoteMode])
+  }, [apiJwt, demoMode, runApiDiagnostics])
 
   const handleHelperConsumption = useCallback(async () => {
     if (cart.length === 0) {
@@ -1071,7 +1156,7 @@ export function PosScreen({
       } else if (e.key === 'Enter') {
         e.preventDefault()
         if (!saleAvailability.canSell || cart.length === 0) return
-        openCashModal('noBon')
+        openCashModal('withBon')
       }
     }
     window.addEventListener('keydown', onKey)
@@ -1361,71 +1446,72 @@ export function PosScreen({
         </aside>
       </div>
 
-      <footer className="flex-shrink-0 space-y-2 border-t border-[#ff003c]/30 bg-black px-3 pb-4 pt-3 md:px-5">
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
+      <footer className="flex-shrink-0 space-y-3 border-t border-[#ff003c]/30 bg-black px-3 pb-4 pt-3 md:px-5">
+        <div className="rounded-xl border border-[#ff003c]/40 bg-neutral-950/40 p-3">
+          <p className="mb-2 text-xs font-black uppercase tracking-[0.12em] text-[#FFD700]">
+            Abschlussart wählen
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
             onClick={() => openCashModal('withBon')}
-            className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-[#ff003c] bg-red-950/30 px-4 py-2 text-lg font-black uppercase text-white shadow-[0_0_24px_rgba(255,0,60,0.25)] transition enabled:hover:bg-red-950/50 disabled:opacity-35"
+            title="Kunde bezahlt bar."
+            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-emerald-400/70 bg-emerald-900/30 px-4 py-2 text-lg font-black uppercase text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.28)] transition enabled:hover:bg-emerald-900/45 disabled:opacity-35"
           >
             Barzahlung
-            <span className="text-xs font-bold text-[#FFD700]">F12</span>
+            <span className="text-xs font-bold text-emerald-200">F12 / Enter</span>
           </button>
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => setCardOpen(true)}
-            className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-[#FFD700] bg-black px-4 py-2 text-lg font-black uppercase text-[#FFD700] shadow-[0_0_20px_rgba(255,215,0,0.15)] transition enabled:hover:bg-neutral-950 disabled:opacity-35"
+            title="Kunde bezahlt per Karte."
+            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-cyan-400/70 bg-cyan-950/25 px-4 py-2 text-lg font-black uppercase text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,.22)] transition enabled:hover:bg-cyan-950/40 disabled:opacity-35"
           >
             Kartenzahlung
-            <span className="text-xs font-bold text-neutral-400">F11</span>
+            <span className="text-xs font-bold text-cyan-200">F11</span>
           </button>
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0 || (!remoteMode && !demoMode)}
             onClick={() => setInvoiceOpen(true)}
-            title={!remoteMode && !demoMode ? 'Erfordert API + Login' : ''}
-            className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-black px-4 py-2 text-lg font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-neutral-950 disabled:opacity-35"
+            title={!remoteMode && !demoMode ? 'Auf Team/Verein buchen. (Erfordert API + Login)' : 'Auf Team/Verein buchen.'}
+            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-cyan-950/20 px-4 py-2 text-lg font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-cyan-950/35 disabled:opacity-35"
           >
             Auf Rechnung
           </button>
           <button
             type="button"
-            disabled={cart.length === 0 || printBusy}
-            onClick={() => void handlePrintDraft()}
-            className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-[#ff003c] bg-black px-4 py-2 text-lg font-black uppercase text-white shadow-[0_0_20px_rgba(255,0,60,0.2)] transition enabled:hover:bg-red-950/20 disabled:opacity-35"
-          >
-            Bon drucken
-            <span className="text-xs font-bold text-[#FFD700]">F10</span>
-          </button>
-          <button
-            type="button"
             disabled={!saleAvailability.canSell || cart.length === 0}
-            onClick={() => openCashModal('noBon')}
-            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-[#FFD700] bg-gradient-to-b from-[#8a7500]/40 to-black px-4 py-2 text-xl font-black uppercase text-[#FFD700] shadow-[0_0_28px_rgba(255,215,0,0.35)] transition enabled:hover:brightness-110 disabled:opacity-35"
-          >
-            <span className="text-2xl leading-none">✓</span>
-            Verkauf abschließen
-            <span className="text-xs font-bold text-white/80">Enter</span>
-          </button>
-        </div>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => void handleDepositRedeem()}
-            className="rounded-lg border border-sky-500/50 bg-sky-950/20 px-3 py-2 text-xs font-bold uppercase text-sky-100 hover:bg-sky-950/35"
-          >
-            Pfand auszahlen
-          </button>
-          <button
-            type="button"
-            disabled={cart.length === 0}
             onClick={() => void handleHelperConsumption()}
-            className="rounded-lg border border-emerald-500/50 bg-emerald-950/20 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/35 disabled:opacity-35"
+            title="Kostenlose Helferausgabe dokumentieren."
+            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-orange-400/70 bg-orange-900/25 px-4 py-2 text-lg font-black uppercase text-orange-100 shadow-[0_0_22px_rgba(251,146,60,.24)] transition enabled:hover:bg-orange-900/40 disabled:opacity-35"
           >
             Helferverpflegung
+            <span className="text-xs font-bold text-orange-200">0,00 EUR - dokumentieren</span>
           </button>
+        </div>
+        </div>
+        <div className="rounded-xl border border-sky-500/35 bg-sky-950/15 p-3">
+          <p className="mb-2 text-xs font-black uppercase tracking-[0.12em] text-sky-200">
+            Sonderfunktion
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            disabled={
+              !demoMode &&
+              !(apiJwt && apiDiag.healthReachable && apiDiag.apiReachable && apiDiag.depositEndpointReachable)
+            }
+            onClick={() => void handleDepositRedeem()}
+            title="Pfandbon prüfen und Pfand zurückzahlen."
+            className="flex min-h-[62px] flex-col items-center justify-center rounded-lg border border-sky-500/60 bg-sky-950/25 px-3 py-2 text-sm font-bold uppercase text-sky-100 hover:bg-sky-950/40 disabled:opacity-35"
+          >
+            Pfand auszahlen
+            <span className="text-[11px] font-semibold text-sky-200">Pfandbon einlösen</span>
+          </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2">
@@ -1434,6 +1520,7 @@ export function PosScreen({
               type="button"
               disabled={cart.length === 0 || printBusy}
               onClick={() => void handlePrintDraft()}
+              title="Bon-Entwurf drucken."
               className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50 disabled:opacity-35"
             >
               Bon Entwurf
@@ -1442,6 +1529,7 @@ export function PosScreen({
               type="button"
               disabled={cart.length === 0}
               onClick={clearWholeCart}
+              title="Warenkorb komplett leeren."
               className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-[#ff003c] hover:border-[#ff003c]/60 disabled:opacity-35"
             >
               Warenkorb leeren
@@ -1458,6 +1546,7 @@ export function PosScreen({
             <button
               type="button"
               onClick={() => onOpenAdmin()}
+              title="Artikel und Stammdaten verwalten."
               className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
               Artikel verwalten
@@ -1465,12 +1554,31 @@ export function PosScreen({
             <button
               type="button"
               onClick={() => onOpenZReport()}
+              title="Tagesbericht und Abschlüsse anzeigen."
               className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
               Tagesbericht
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
+            <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
+              Betriebsmodus:{' '}
+              <span className="font-black text-white">
+                {demoMode ? 'Demo' : apiJwt && apiDiag.healthReachable && apiDiag.apiReachable ? 'API/Server' : 'Offline'}
+              </span>
+              {' · '}API-Status:{' '}
+              <span className="font-black text-white">
+                {apiDiag.healthReachable && apiDiag.apiReachable ? 'verbunden' : 'nicht verbunden'}
+              </span>
+              {' · '}Backend-URL:{' '}
+              <span className="font-mono normal-case text-slate-200">{apiDiag.baseUrl || '/api'}</span>
+              <div className="mt-1 normal-case text-[10px] text-slate-400">
+                Checks: API_BASE_URL {apiDiag.baseSet ? 'gesetzt' : 'leer'} · /health{' '}
+                {apiDiag.healthReachable ? 'ok' : 'fail'} · /api {apiDiag.apiReachable ? 'ok' : 'fail'} ·
+                Pfand-Endpunkt {apiDiag.depositEndpointReachable ? 'ok' : 'fail'} · Offline-Modus{' '}
+                {!apiJwt ? 'ja' : 'nein'} · Demo {demoMode ? 'ja' : 'nein'}
+              </div>
+            </div>
             {demoMode ? (
               <>
                 <button
