@@ -1673,9 +1673,12 @@ async function bootstrap() {
 
   if (env.spaRoot) await registerSpaAssetsAndFallback(app, env.spaRoot)
 
-  await app.listen({ port: env.port, host: '0.0.0.0' })
+  const host = '0.0.0.0'
+  const port = env.port
 
-  console.log(`drk-kasse-api listening ${env.port}`)
+  await app.listen({ port, host })
+
+  console.log(`drk-kasse-api listening on http://${host}:${port}`)
 }
 
 bootstrap().catch((e) => {
