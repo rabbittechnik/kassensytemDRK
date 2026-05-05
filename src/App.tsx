@@ -9,6 +9,7 @@ import { getStoredToken, hasApi } from './api/config'
 import { logOut } from './api/auth'
 import { DemoBanner } from './demo/DemoBanner'
 import { OfflineIndicator } from './pwa/OfflineIndicator'
+import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
 
 function PinOverlay(props: {
   onSuccess: () => void
@@ -89,57 +90,57 @@ export default function App() {
     return () => window.removeEventListener('drk-kasse-auth', sync)
   }, [])
 
-  if (!ready) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-300">
-        <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-        <p>Datenbank wird vorbereitet …</p>
-      </div>
-    )
-  }
-
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <DemoBanner />
-      <div className="min-h-0 flex-1">
-        {route === 'pos' && (
-          <PosScreen
-            apiJwt={hasApi() ? apiJwt : null}
-            onApiLogout={
-              hasApi()
-                ? () => {
-                    logOut()
-                    setApiJwt(null)
-                  }
-                : undefined
-            }
-            onOpenAdmin={() => {
-              setAdminOk(false)
-              setRoute('admin')
-            }}
-            onOpenZReport={() => setZOpen(true)}
-          />
-        )}
-        {route === 'admin' && !adminOk && (
-          <PinOverlay
-            onSuccess={() => setAdminOk(true)}
-            onCancel={() => {
-              setRoute('pos')
-              setAdminOk(false)
-            }}
-          />
-        )}
-        {route === 'admin' && adminOk && (
-          <AdminScreen
-            onBack={() => {
-              setRoute('pos')
-              setAdminOk(false)
-            }}
-          />
-        )}
-        {zOpen && <ZReportModal onClose={() => setZOpen(false)} />}
-      </div>
-      <OfflineIndicator />
-    </div>
+    <PwaUpdateProvider>
+      {!ready ? (
+        <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-300">
+          <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+          <p>Datenbank wird vorbereitet …</p>
+        </div>
+      ) : (
+        <div className="flex h-full min-h-0 flex-col">
+          <DemoBanner />
+          <div className="min-h-0 flex-1">
+            {route === 'pos' && (
+              <PosScreen
+                apiJwt={hasApi() ? apiJwt : null}
+                onApiLogout={
+                  hasApi()
+                    ? () => {
+                        logOut()
+                        setApiJwt(null)
+                      }
+                    : undefined
+                }
+                onOpenAdmin={() => {
+                  setAdminOk(false)
+                  setRoute('admin')
+                }}
+                onOpenZReport={() => setZOpen(true)}
+              />
+            )}
+            {route === 'admin' && !adminOk && (
+              <PinOverlay
+                onSuccess={() => setAdminOk(true)}
+                onCancel={() => {
+                  setRoute('pos')
+                  setAdminOk(false)
+                }}
+              />
+            )}
+            {route === 'admin' && adminOk && (
+              <AdminScreen
+                onBack={() => {
+                  setRoute('pos')
+                  setAdminOk(false)
+                }}
+              />
+            )}
+            {zOpen && <ZReportModal onClose={() => setZOpen(false)} />}
+          </div>
+          <OfflineIndicator />
+        </div>
+      )}
+    </PwaUpdateProvider>
   )
 }

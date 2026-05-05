@@ -193,26 +193,47 @@ export function createDailyClosing(params: {
   user: JwtUser
   day: string
   actualCashDrawerCents?: number
+  /** Veranstaltung; null = alle Verkäufe des Tages (Kompatibilität). */
+  eventId?: string | null
 }) {
   const periodStart = new Date(`${params.day}T00:00:00`).getTime()
   const periodEnd = new Date(`${params.day}T23:59:59.999`).getTime()
 
-  const existing = params.db
-    .prepare(`SELECT id FROM day_closings WHERE day_key = ?`)
-    .get(params.day) as { id: string } | undefined
+  const eid = params.eventId?.trim() || null
+
+  const existing = eid
+    ? (params.db
+        .prepare(`SELECT id FROM day_closings WHERE day_key = ? AND event_id = ?`)
+        .get(params.day, eid) as { id: string } | undefined)
+    : (params.db
+        .prepare(`SELECT id FROM day_closings WHERE day_key = ? AND (event_id IS NULL OR event_id = '')`)
+        .get(params.day) as { id: string } | undefined)
   if (existing) throw new Error('DAY_ALREADY_CLOSED')
 
-  const sales = params.db
-    .prepare(`SELECT * FROM sales WHERE day_key = ? ORDER BY created_at`)
-    .all(params.day) as Array<Record<string, unknown>>
-  const lines = params.db
-    .prepare(
-      `SELECT sl.*, p.name as product_name
-       FROM sale_lines sl
-       LEFT JOIN products p ON p.id = sl.product_id
-       WHERE sl.sale_id IN (SELECT id FROM sales WHERE day_key = ?)`,
-    )
-    .all(params.day) as Array<Record<string, unknown>>
+  const sales = eid
+    ? (params.db
+        .prepare(`SELECT * FROM sales WHERE day_key = ? AND event_id = ? ORDER BY created_at`)
+        .all(params.day, eid) as Array<Record<string, unknown>>)
+    : (params.db
+        .prepare(`SELECT * FROM sales WHERE day_key = ? ORDER BY created_at`)
+        .all(params.day) as Array<Record<string, unknown>>)
+  const lines = eid
+    ? (params.db
+        .prepare(
+          `SELECT sl.*, p.name as product_name
+           FROM sale_lines sl
+           LEFT JOIN products p ON p.id = sl.product_id
+           WHERE sl.sale_id IN (SELECT id FROM sales WHERE day_key = ? AND event_id = ?)`,
+        )
+        .all(params.day, eid) as Array<Record<string, unknown>>)
+    : (params.db
+        .prepare(
+          `SELECT sl.*, p.name as product_name
+           FROM sale_lines sl
+           LEFT JOIN products p ON p.id = sl.product_id
+           WHERE sl.sale_id IN (SELECT id FROM sales WHERE day_key = ?)`,
+        )
+        .all(params.day) as Array<Record<string, unknown>>)
 
   const total = sales.reduce((s, x) => s + Number(x.total_cents ?? 0), 0)
   const cash = sales
@@ -266,6 +287,7 @@ export function createDailyClosing(params: {
   csvRows.push(`bar_cents;${cash}`)
   csvRows.push(`karte_cents;${card}`)
   csvRows.push(`rechnung_cents;${invoice}`)
+  csvRows.push(`event_id;${eid ?? ''}`)
   csvRows.push(`anzahl_verkaeufe;${sales.length}`)
   csvRows.push(`anzahl_stornos;${stornoCount}`)
   csvRows.push(`storno_summe_cents;${stornoTotal}`)
@@ -285,6 +307,7 @@ export function createDailyClosing(params: {
   doc.fontSize(18).text(`Tagesabschluss ${String(closingNo).padStart(6, '0')}`)
   doc.moveDown(0.5)
   doc.fontSize(11).text(`Datum: ${params.day}`)
+  if (eid) doc.text(`Veranstaltungs-ID: ${eid}`)
   doc.text(`Zeitraum: ${new Date(periodStart).toLocaleString('de-DE')} - ${new Date(periodEnd).toLocaleString('de-DE')}`)
   doc.text(`Verkäufe: ${sales.length} | Stornos: ${stornoCount}`)
   doc.text(`Gesamtumsatz: ${fmtEur(total)}`)
@@ -315,8 +338,8 @@ export function createDailyClosing(params: {
           id, closing_number, day_key, period_start, period_end, gross_total_cents, cash_total_cents,
           card_total_cents, invoice_total_cents, storno_count, storno_total_cents, sales_count,
           users_json, by_category_json, expected_cash_drawer_cents, actual_cash_drawer_cents,
-          drawer_diff_cents, csv_rel_path, pdf_rel_path, created_by_user_id, created_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          drawer_diff_cents, csv_rel_path, pdf_rel_path, created_by_user_id, created_at, event_id
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -340,6 +363,7 @@ export function createDailyClosing(params: {
         pdfRel,
         params.user.sub,
         Date.now(),
+        eid,
       )
 
     const ids = sales.map((s) => String(s.id))

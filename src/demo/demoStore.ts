@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from 'react'
-import type { CartLine, PaymentMethod } from '../types'
+import type { CartLine, OutputReceiptStored, PaymentMethod, ProductOutputGroup } from '../types'
+import { defaultOutputGroupForProduct } from '../db/productOutputDefaults'
 import { DEMO_TEAM_TEMPLATES, type DemoTeamTemplate } from './demoTeams'
 
 /**
@@ -33,6 +34,7 @@ export interface DemoSaleLine {
   categoryId: string
   categoryName: string
   categorySort: number
+  outputGroup: ProductOutputGroup
 }
 
 export interface DemoSale {
@@ -46,7 +48,7 @@ export interface DemoSale {
   paymentMethod: PaymentMethod
   lines: DemoSaleLine[]
   customerReceiptText: string
-  servingReceiptText: string
+  outputReceipts: OutputReceiptStored[]
   teamName?: string
   /** Rechnungsverkauf: Team-/Event-Zuordnung fuer Demo-Open-Posts */
   teamId?: string
@@ -339,13 +341,21 @@ export function snapshotDemoSales(): DemoSale[] {
 /** Hilfs-Konvertierung Cart -> demo-Lines mit Kategorien. */
 export function buildDemoLines(
   cart: CartLine[],
-  productLookup: (id: string) => { categoryId: string; categoryName: string; categorySort: number } | null,
+  productLookup: (
+    id: string,
+  ) => {
+    categoryId: string
+    categoryName: string
+    categorySort: number
+    outputGroup: ProductOutputGroup
+  } | null,
 ): DemoSaleLine[] {
   return cart.map((l) => {
     const meta = productLookup(l.productId) ?? {
       categoryId: 'unknown',
       categoryName: 'Sonstige',
       categorySort: 999,
+      outputGroup: defaultOutputGroupForProduct(l.productId, l.name),
     }
     return {
       productId: l.productId,
@@ -356,6 +366,7 @@ export function buildDemoLines(
       categoryId: meta.categoryId,
       categoryName: meta.categoryName,
       categorySort: meta.categorySort,
+      outputGroup: meta.outputGroup,
     }
   })
 }

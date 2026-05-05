@@ -1,10 +1,20 @@
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const pkg = JSON.parse(
+  readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
+) as { version: string }
+const buildAtIso = new Date().toISOString()
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    'import.meta.env.VITE_APP_VERSION': JSON.stringify(pkg.version),
+    'import.meta.env.VITE_APP_BUILD_AT': JSON.stringify(buildAtIso),
+  },
   server: {
     /** Wenn `VITE_API_BASE_URL=/api` und API lokal mit API_MOUNT_PATH=/api: Proxy zum Dev-Server */
     proxy: {
@@ -18,7 +28,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      /** Nutzer bestätigt Update (`useRegisterSW` / Workbox `waiting`). */
+      registerType: 'prompt',
       includeAssets: [
         'favicon.svg',
         'icons/icon.svg',
@@ -63,10 +74,25 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2,webmanifest}'],
-        // Cache nur App-Shell, NIE echte Kassendaten / API-Responses.
+        // Cache nur App-Shell; API/Health/DATA nie aus SW-Cache bedienen.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
+        navigateFallbackDenylist: [/^\/api\//, /^\/health$/, /^\/DATA(\/|$)/],
+        clientsClaim: true,
+        skipWaiting: false,
         runtimeCaching: [
+          {
+            urlPattern: ({ url, request }) => {
+              if (request.mode === 'navigate') return false
+              const p = url.pathname
+              return (
+                p.startsWith('/api/') ||
+                p === '/health' ||
+                p === '/DATA' ||
+                p.startsWith('/DATA/')
+              )
+            },
+            handler: 'NetworkOnly',
+          },
           {
             urlPattern: /^.*\/assets\/products\/.*\.(?:png|jpe?g|webp)$/,
             handler: 'CacheFirst',

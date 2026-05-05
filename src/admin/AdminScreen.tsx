@@ -6,7 +6,14 @@ import { sha256Hex } from '../lib/pin'
 import { formatMoney } from '../lib/format'
 import { exportSalesCsv } from '../export/exportSales'
 import { exportDemoSalesCsv } from '../export/exportDemo'
-import type { CategoryRow, ProductRow } from '../types'
+import type { CategoryRow, ProductOutputGroup, ProductRow } from '../types'
+
+const OUTPUT_GROUP_OPTIONS: { value: ProductOutputGroup; label: string }[] = [
+  { value: 'getraenke', label: 'Getränke' },
+  { value: 'kuchen_suess', label: 'Kuchen / Süßes' },
+  { value: 'heisses_essen', label: 'Heißes Essen' },
+  { value: 'keine_ausgabe', label: 'Keine Ausgabe' },
+]
 import { TeamsBilling } from './TeamsBilling'
 import { ReceiptManagePanel } from './ReceiptManagePanel'
 import {
@@ -18,15 +25,18 @@ import {
 import { DemoCodeOverlay } from '../demo/DemoCodeOverlay'
 import { logDemoModeAudit } from '../demo/demoAudit'
 import { IssuerServerSettingsBlock } from './IssuerServerSettings'
+import { EventsManagement } from './EventsManagement'
 import { DeviceInstallPanel } from '../pwa/DeviceInstallPanel'
 import { InstallAppButton } from '../pwa/InstallAppButton'
 import { IosInstallGuide } from '../pwa/IosInstallGuide'
 import { todayKey } from '../lib/format'
+import { buildMetaSummary } from '../lib/buildMeta'
 
 const tabs = [
   'Artikel',
   'Kategorien',
   'Teams / Rechnungen',
+  'Veranstaltungen',
   'Export',
   'Gerät',
   'Einstellungen',
@@ -46,7 +56,7 @@ export function AdminScreen(props: { onBack: () => void }) {
             {demoMode ? 'Admin (DEMO)' : 'Admin'}
           </h1>
           <p className="text-sm text-slate-400">
-            Artikel · Teams · Export · Einstellungen
+            Artikel · Teams · Veranstaltungen · Export · Einstellungen
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -107,6 +117,7 @@ export function AdminScreen(props: { onBack: () => void }) {
         {tab === 'Artikel' && <ProductsAdmin />}
         {tab === 'Kategorien' && <CategoriesAdmin />}
         {tab === 'Teams / Rechnungen' && <TeamsBilling />}
+        {tab === 'Veranstaltungen' && <EventsManagement />}
         {tab === 'Export' && <ExportPanel />}
         {tab === 'Gerät' && <DeviceInstallPanel />}
         {tab === 'Einstellungen' && <SettingsPanel />}
@@ -144,12 +155,13 @@ function ProductsAdmin() {
         </button>
       </div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[760px] text-left text-sm">
           <thead>
             <tr className="border-b border-white/10 text-slate-400">
               <th className="py-2 pr-3">Name</th>
               <th className="py-2 pr-3">Kategorie</th>
               <th className="py-2 pr-3">Preis</th>
+              <th className="py-2 pr-3">Ausgabe</th>
               <th className="py-2 pr-3">Aktiv</th>
               <th className="py-2">Aktion</th>
             </tr>
@@ -158,6 +170,9 @@ function ProductsAdmin() {
             {(products ?? []).map((p) => {
               const cname =
                 categories?.find((c) => c.id === p.categoryId)?.name ?? '—'
+              const ogLabel =
+                OUTPUT_GROUP_OPTIONS.find((o) => o.value === (p.outputGroup ?? 'keine_ausgabe'))
+                  ?.label ?? '—'
               return (
                 <tr
                   key={p.id}
@@ -170,6 +185,7 @@ function ProductsAdmin() {
                   <td className="py-2 pr-3 tabular-nums text-cyan-100">
                     {formatMoney(p.priceCents)}
                   </td>
+                  <td className="py-2 pr-3 text-slate-400">{ogLabel}</td>
                   <td className="py-2 pr-3">{p.active ? 'Ja' : 'Nein'}</td>
                   <td className="py-2">
                     <button
@@ -218,6 +234,9 @@ function ProductEditor(props: {
     existing?.categoryId ?? catList[0]?.id ?? '',
   )
   const [active, setActive] = useState(existing?.active ?? true)
+  const [outputGroup, setOutputGroup] = useState<ProductOutputGroup>(
+    existing?.outputGroup ?? 'keine_ausgabe',
+  )
   const [imageUrl, setImageUrl] = useState(
     (existing?.imageUrl ?? '').trim(),
   )
@@ -235,6 +254,7 @@ function ProductEditor(props: {
         categoryId,
         priceCents,
         active,
+        outputGroup,
         sortOrder: max + 10,
         ...(imageUrl.trim() ?
           { imageUrl: imageUrl.trim() }
@@ -246,6 +266,7 @@ function ProductEditor(props: {
         categoryId,
         priceCents,
         active,
+        outputGroup,
         imageUrl: imageUrl.trim() ? imageUrl.trim() : null,
       })
     }
@@ -257,6 +278,7 @@ function ProductEditor(props: {
     imageUrl,
     isNew,
     name,
+    outputGroup,
     priceStr,
     onClose,
   ])
@@ -289,6 +311,20 @@ function ProductEditor(props: {
           {catList.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
+            </option>
+          ))}
+        </select>
+        <label className="mt-3 block text-sm text-slate-400">
+          Ausgabegruppe (Servier-/Ausgabe-Bon)
+        </label>
+        <select
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-3 text-white"
+          value={outputGroup}
+          onChange={(e) => setOutputGroup(e.target.value as ProductOutputGroup)}
+        >
+          {OUTPUT_GROUP_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
             </option>
           ))}
         </select>
@@ -447,6 +483,7 @@ function ExportPanel() {
 }
 
 function SettingsPanel() {
+  const appMeta = buildMetaSummary()
   const org = useLiveQuery(
     () => db.settings.where('key').equals('orgName').first(),
     [],
@@ -478,6 +515,9 @@ function SettingsPanel() {
   return (
     <div className="mx-auto max-w-xl space-y-4">
       <h2 className="text-lg font-semibold text-white">Einstellungen</h2>
+      <p className="font-mono text-[11px] text-slate-500">
+        Version: {appMeta.version} · Build: {appMeta.buildFormatted}
+      </p>
       <p className="text-xs text-slate-500">
         Textfelder werden bei Eingabe direkt gespeichert (IndexedDB).
       </p>
@@ -539,7 +579,11 @@ function SettingsPanel() {
 function BonSettingsBlock() {
   const width = useLiveQuery(() => db.settings.where('key').equals('receiptWidthMm').first(), [])
   const pc = useLiveQuery(() => db.settings.where('key').equals('printCustomerReceipt').first(), [])
-  const ps = useLiveQuery(() => db.settings.where('key').equals('printServingReceipt').first(), [])
+  const pob = useLiveQuery(() => db.settings.where('key').equals('printOutputBons').first(), [])
+  const pg = useLiveQuery(() => db.settings.where('key').equals('printOutputBonGetraenke').first(), [])
+  const pk = useLiveQuery(() => db.settings.where('key').equals('printOutputBonKuchen').first(), [])
+  const ph = useLiveQuery(() => db.settings.where('key').equals('printOutputBonHeiss').first(), [])
+  const demoAuto = useLiveQuery(() => db.settings.where('key').equals('demoAutoPrintReceipts').first(), [])
   const tag = useLiveQuery(() => db.settings.where('key').equals('receiptTagline').first(), [])
   const reg = useLiveQuery(() => db.settings.where('key').equals('registerName').first(), [])
   const cash = useLiveQuery(() => db.settings.where('key').equals('cashierName').first(), [])
@@ -569,10 +613,56 @@ function BonSettingsBlock() {
       <label className="flex items-center gap-2 text-sm text-slate-300">
         <input
           type="checkbox"
-          checked={ps?.value !== '0'}
-          onChange={(e) => void setSetting('printServingReceipt', e.target.checked ? '1' : '0')}
+          checked={pob?.value !== '0'}
+          onChange={(e) => void setSetting('printOutputBons', e.target.checked ? '1' : '0')}
         />
-        Servierbon automatisch drucken
+        Ausgabe-Bons (Getränke / Kuchen / Essen) automatisch drucken
+      </label>
+      <p className="text-[11px] text-slate-500">
+        Bei aktivem Haupt-Häkchen werden nur nicht-leere Stations-Bons gedruckt. Später: eigene Drucker pro Station.
+      </p>
+      <label className="flex items-center gap-2 text-sm text-slate-400">
+        <input
+          type="checkbox"
+          checked={pg?.value !== '0'}
+          disabled={pob?.value === '0'}
+          onChange={(e) =>
+            void setSetting('printOutputBonGetraenke', e.target.checked ? '1' : '0')
+          }
+        />
+        Ausgabe-Bon Getränke drucken
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-400">
+        <input
+          type="checkbox"
+          checked={pk?.value !== '0'}
+          disabled={pob?.value === '0'}
+          onChange={(e) =>
+            void setSetting('printOutputBonKuchen', e.target.checked ? '1' : '0')
+          }
+        />
+        Ausgabe-Bon Kuchen/Süßes drucken
+      </label>
+      <label className="flex items-center gap-2 text-sm text-slate-400">
+        <input
+          type="checkbox"
+          checked={ph?.value !== '0'}
+          disabled={pob?.value === '0'}
+          onChange={(e) =>
+            void setSetting('printOutputBonHeiss', e.target.checked ? '1' : '0')
+          }
+        />
+        Ausgabe-Bon Heißes Essen drucken
+      </label>
+      <label className="flex items-center gap-2 text-sm text-yellow-200">
+        <input
+          type="checkbox"
+          checked={demoAuto?.value === '1'}
+          onChange={(e) =>
+            void setSetting('demoAutoPrintReceipts', e.target.checked ? '1' : '0')
+          }
+        />
+        Demo-Bons automatisch drucken (sonst nur Vorschau)
       </label>
       <label className="block text-xs text-slate-400">
         Bon‑Spruch (optional, Zeilenumbruch möglich)

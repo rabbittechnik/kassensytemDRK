@@ -282,4 +282,50 @@ export function migrate(db: BetterSqlite3.Database) {
     "TEXT NOT NULL DEFAULT 'completed' CHECK (lifecycle_status IN ('open', 'completed', 'cancelled', 'refunded', 'closed_day'))",
   )
   ensureColumn(db, 'teams', 'short_name', 'TEXT')
+  migrateEventsSchemaIfNeeded(db)
+  ensureColumn(db, 'day_closings', 'event_id', 'TEXT')
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('active_event_id', '')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_sales_without_event', '1')`).run()
+}
+
+/** Erweitert events (Status planned/active/completed/archived, Zeiten, Ort, …). */
+function migrateEventsSchemaIfNeeded(db: BetterSqlite3.Database) {
+  const cols = db.prepare(`PRAGMA table_info(events)`).all() as Array<{ name: string }>
+  if (cols.length === 0) return
+  if (cols.some((c) => c.name === 'updated_at')) return
+
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN TRANSACTION;
+    CREATE TABLE events_new (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      start_time TEXT,
+      end_time TEXT,
+      location TEXT,
+      description TEXT,
+      status TEXT NOT NULL CHECK (status IN ('planned', 'active', 'completed', 'archived')),
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed_at INTEGER
+    );
+    INSERT INTO events_new (
+      id, name, start_date, end_date, start_time, end_time, location, description,
+      status, created_at, updated_at, closed_at
+    )
+    SELECT
+      id, name, start_date, end_date, NULL, NULL, NULL, NULL,
+      CASE WHEN status = 'closed' THEN 'completed' ELSE 'active' END,
+      created_at,
+      COALESCE(closed_at, created_at),
+      closed_at
+    FROM events;
+    DROP TABLE events;
+    ALTER TABLE events_new RENAME TO events;
+    CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `)
 }

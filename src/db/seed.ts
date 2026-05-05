@@ -1,5 +1,6 @@
 import { sha256Hex } from '../lib/pin'
 import { db } from './database'
+import { defaultOutputGroupForProduct } from './productOutputDefaults'
 
 const CAT_IDS = {
   drinks: 'cat-getraenke',
@@ -49,6 +50,7 @@ function defaultProducts(): {
     p('p-torte', CAT_IDS.cake, 'Torte', 350),
     p('p-muffin', CAT_IDS.cake, 'Muffin', 200),
     p('p-kk', CAT_IDS.cake, 'Kaffee + Kuchen Kombi', 400),
+    p('p-maultaschen-burger', CAT_IDS.food, 'Maultaschen-Burger', 600),
   ]
 }
 
@@ -77,9 +79,25 @@ async function migrateDlrgExtras(): Promise<void> {
         ...row,
         sortOrder: o,
         active: true,
+        outputGroup: defaultOutputGroupForProduct(row.id, row.name),
       })
       o += 10
+    } else if (!exists.outputGroup) {
+      await db.products.update(row.id, {
+        outputGroup: defaultOutputGroupForProduct(row.id, row.name),
+      })
     }
+  }
+}
+
+async function ensureEventSettings(): Promise<void> {
+  const defs: [string, string][] = [
+    ['active_event_id', ''],
+    ['allow_sales_without_event', '1'],
+  ]
+  for (const [k, v] of defs) {
+    const ex = await db.settings.get(k)
+    if (!ex) await db.settings.put({ key: k, value: v })
   }
 }
 
@@ -88,6 +106,11 @@ async function ensureBonSettings(): Promise<void> {
     ['receiptWidthMm', '58'],
     ['printCustomerReceipt', '1'],
     ['printServingReceipt', '1'],
+    ['printOutputBons', '1'],
+    ['printOutputBonGetraenke', '1'],
+    ['printOutputBonKuchen', '1'],
+    ['printOutputBonHeiss', '1'],
+    ['demoAutoPrintReceipts', '0'],
     [
       'receiptTagline',
       'Fuer ECHT. Wenn keiner damit rechnet, sind WIR da.',
@@ -112,6 +135,7 @@ export async function ensureSeed(): Promise<void> {
         await db.products.add({
           ...row,
           active: true,
+          outputGroup: defaultOutputGroupForProduct(row.id, row.name),
         })
       }
       const hash = await sha256Hex('1234')
@@ -133,4 +157,5 @@ export async function ensureSeed(): Promise<void> {
     await migrateDlrgExtras()
   }
   await ensureBonSettings()
+  await ensureEventSettings()
 }

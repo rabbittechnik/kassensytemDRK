@@ -88,6 +88,16 @@ export async function tryBluetoothPrintPlainSequence(
   return sendEscPosBytes(buildEscPosPlainTextBlocks([customerText, servingText], true))
 }
 
+/** Beliebig viele Bons (Kunde + Stations-Ausgaben) mit einem Auftrag/einem Gerät. */
+export async function tryBluetoothPrintPlainBlocks(
+  blocks: string[],
+): Promise<BluetoothPrintResult> {
+  if (blocks.length === 0)
+    return { ok: false, message: 'Keine Druckdaten.' }
+  if (blocks.length === 1) return tryBluetoothPrintPlainText(blocks[0])
+  return sendEscPosBytes(buildEscPosPlainTextBlocks(blocks, true))
+}
+
 export function downloadTextFile(filename: string, text: string): void {
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)

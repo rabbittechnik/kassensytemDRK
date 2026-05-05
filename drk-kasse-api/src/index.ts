@@ -188,7 +188,15 @@ async function guardedRoutes(app: FastifyInstance) {
   })
 
   app.get('/settings', async (_req) => {
-    const keys = ['org_name', 'tax_mode', 'tax_notice', 'issuer_snapshot', 'receipt_footer']
+    const keys = [
+      'org_name',
+      'tax_mode',
+      'tax_notice',
+      'issuer_snapshot',
+      'receipt_footer',
+      'active_event_id',
+      'allow_sales_without_event',
+    ]
     const out: Record<string, string> = {}
     const st = app.sqlite.prepare(`SELECT value FROM settings WHERE key = ?`)
     for (const k of keys) {
@@ -207,6 +215,8 @@ async function guardedRoutes(app: FastifyInstance) {
         taxNotice: z.string().optional(),
         issuerSnapshot: z.record(z.string(), z.unknown()).optional(),
         receiptFooter: z.string().optional(),
+        activeEventId: z.string().nullable().optional(),
+        allowSalesWithoutEvent: z.boolean().optional(),
       })
       .parse(req.body ?? {})
 
@@ -219,6 +229,9 @@ async function guardedRoutes(app: FastifyInstance) {
     if (b.taxNotice !== undefined) stmt.run('tax_notice', b.taxNotice)
     if (b.issuerSnapshot !== undefined) stmt.run('issuer_snapshot', jsonify(b.issuerSnapshot))
     if (b.receiptFooter !== undefined) stmt.run('receipt_footer', b.receiptFooter)
+    if (b.activeEventId !== undefined) stmt.run('active_event_id', b.activeEventId ?? '')
+    if (b.allowSalesWithoutEvent !== undefined)
+      stmt.run('allow_sales_without_event', b.allowSalesWithoutEvent ? '1' : '0')
 
     appendAudit({
       db: app.sqlite,
@@ -557,31 +570,74 @@ async function guardedRoutes(app: FastifyInstance) {
   app.get('/events', async () =>
     app.sqlite
       .prepare(
-        `SELECT id, name, start_date AS startDate, end_date AS endDate,
-           status, created_at AS createdAt, closed_at AS closedAt
+        `SELECT id, name,
+           start_date AS startDate, end_date AS endDate,
+           start_time AS startTime, end_time AS endTime,
+           location, description,
+           status, created_at AS createdAt, updated_at AS updatedAt, closed_at AS closedAt
          FROM events ORDER BY start_date DESC`,
       )
       .all(),
   )
+
+  app.get('/events/active', async () => {
+    const row = app.sqlite
+      .prepare(`SELECT value FROM settings WHERE key = 'active_event_id'`)
+      .get() as { value: string } | undefined
+    const id = row?.value?.trim()
+    if (!id) return null
+    const ev = app.sqlite
+      .prepare(
+        `SELECT id, name,
+           start_date AS startDate, end_date AS endDate,
+           start_time AS startTime, end_time AS endTime,
+           location, description,
+           status, created_at AS createdAt, updated_at AS updatedAt, closed_at AS closedAt
+         FROM events WHERE id = ?`,
+      )
+      .get(id) as Record<string, unknown> | undefined
+    return ev ?? null
+  })
 
   app.post('/events', async (req, reply) => {
     if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const b = z
       .object({
-        name: z.string(),
+        name: z.string().min(1),
         startDate: z.string(),
         endDate: z.string(),
+        startTime: z.string().optional().nullable(),
+        endTime: z.string().optional().nullable(),
+        location: z.string().optional().nullable(),
+        description: z.string().optional().nullable(),
+        status: z.enum(['planned', 'active', 'completed', 'archived']).optional(),
       })
       .parse(req.body ?? {})
 
     const id = crypto.randomUUID()
+    const now = Date.now()
+    const status = b.status ?? 'planned'
     app.sqlite
       .prepare(
-        `INSERT INTO events (id, name, start_date, end_date, status, created_at)
-         VALUES (?,?,?,?, ?,?)`,
+        `INSERT INTO events (
+          id, name, start_date, end_date, start_time, end_time, location, description,
+          status, created_at, updated_at
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       )
-      .run(id, b.name, b.startDate.slice(0, 10), b.endDate.slice(0, 10), 'active', Date.now())
+      .run(
+        id,
+        b.name.trim(),
+        b.startDate.slice(0, 10),
+        b.endDate.slice(0, 10),
+        b.startTime?.trim() || null,
+        b.endTime?.trim() || null,
+        b.location?.trim() || null,
+        b.description?.trim() || null,
+        status,
+        now,
+        now,
+      )
 
     appendAudit({
       db: app.sqlite,
@@ -593,12 +649,175 @@ async function guardedRoutes(app: FastifyInstance) {
     return { id }
   })
 
+  app.patch('/events/:id', async (req, reply) => {
+    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+    const eid = String((req.params as { id: string }).id)
+    const exists = app.sqlite.prepare(`SELECT id, status FROM events WHERE id = ?`).get(eid) as
+      | { id: string; status: string }
+      | undefined
+    if (!exists) return reply.code(404).send({ error: 'NOT_FOUND' })
+    if (exists.status === 'completed' || exists.status === 'archived') {
+      return reply.code(400).send({ error: 'EVENT_LOCKED' })
+    }
+
+    const b = z
+      .object({
+        name: z.string().min(1).optional(),
+        startDate: z.string().optional(),
+        endDate: z.string().optional(),
+        startTime: z.string().nullable().optional(),
+        endTime: z.string().nullable().optional(),
+        location: z.string().nullable().optional(),
+        description: z.string().nullable().optional(),
+      })
+      .parse(req.body ?? {})
+
+    const cur = app.sqlite
+      .prepare(
+        `SELECT name, start_date, end_date, start_time, end_time, location, description
+         FROM events WHERE id = ?`,
+      )
+      .get(eid) as
+      | {
+          name: string
+          start_date: string
+          end_date: string
+          start_time: string | null
+          end_time: string | null
+          location: string | null
+          description: string | null
+        }
+      | undefined
+    if (!cur) return reply.code(404).send({ error: 'NOT_FOUND' })
+
+    const name = b.name !== undefined ? b.name.trim() : cur.name
+    const startDate = b.startDate !== undefined ? b.startDate.slice(0, 10) : cur.start_date
+    const endDate = b.endDate !== undefined ? b.endDate.slice(0, 10) : cur.end_date
+    const startTime =
+      b.startTime === undefined ? cur.start_time
+      : b.startTime ? b.startTime.trim()
+      : null
+    const endTime =
+      b.endTime === undefined ? cur.end_time
+      : b.endTime ? b.endTime.trim()
+      : null
+    const location =
+      b.location === undefined ? cur.location
+      : b.location ? b.location.trim()
+      : null
+    const description =
+      b.description === undefined ? cur.description
+      : b.description ? b.description.trim()
+      : null
+
+    const now = Date.now()
+    app.sqlite
+      .prepare(
+        `UPDATE events SET
+          name = ?, start_date = ?, end_date = ?, start_time = ?, end_time = ?,
+          location = ?, description = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(name, startDate, endDate, startTime, endTime, location, description, now, eid)
+
+    appendAudit({
+      db: app.sqlite,
+      dataRoot: app.dataRoot,
+      type: 'event_updated',
+      userId: req.user.sub,
+      payload: { id: eid },
+    })
+    return { ok: true }
+  })
+
+  app.post('/events/:id/activate', async (req, reply) => {
+    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+    const eid = String((req.params as { id: string }).id)
+    const ev = app.sqlite.prepare(`SELECT id, status FROM events WHERE id = ?`).get(eid) as
+      | { id: string; status: string }
+      | undefined
+    if (!ev) return reply.code(404).send({ error: 'NOT_FOUND' })
+    if (ev.status === 'completed' || ev.status === 'archived') {
+      return reply.code(400).send({ error: 'EVENT_NOT_ACTIVATABLE' })
+    }
+    const now = Date.now()
+    app.sqlite.prepare(`UPDATE events SET status = 'planned', updated_at = ? WHERE status = 'active'`).run(now)
+    app.sqlite.prepare(`UPDATE events SET status = 'active', updated_at = ? WHERE id = ?`).run(now, eid)
+    app.sqlite
+      .prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES ('active_event_id', ?)`)
+      .run(eid)
+
+    appendAudit({
+      db: app.sqlite,
+      dataRoot: app.dataRoot,
+      type: 'event_activated',
+      userId: req.user.sub,
+      payload: { id: eid },
+    })
+    return { ok: true }
+  })
+
+  app.post('/events/:id/complete', async (req, reply) => {
+    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+    const eid = String((req.params as { id: string }).id)
+    const ev = app.sqlite.prepare(`SELECT id FROM events WHERE id = ?`).get(eid) as { id: string } | undefined
+    if (!ev) return reply.code(404).send({ error: 'NOT_FOUND' })
+    const now = Date.now()
+    app.sqlite
+      .prepare(
+        `UPDATE events SET status = 'completed', closed_at = COALESCE(closed_at, ?), updated_at = ? WHERE id = ?`,
+      )
+      .run(now, now, eid)
+    app.sqlite
+      .prepare(`UPDATE settings SET value = '' WHERE key = 'active_event_id' AND value = ?`)
+      .run(eid)
+
+    appendAudit({
+      db: app.sqlite,
+      dataRoot: app.dataRoot,
+      type: 'event_completed',
+      userId: req.user.sub,
+      payload: { id: eid },
+    })
+    return { ok: true }
+  })
+
+  app.post('/events/:id/archive', async (req, reply) => {
+    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+    const eid = String((req.params as { id: string }).id)
+    const ev = app.sqlite.prepare(`SELECT id FROM events WHERE id = ?`).get(eid) as { id: string } | undefined
+    if (!ev) return reply.code(404).send({ error: 'NOT_FOUND' })
+    const now = Date.now()
+    app.sqlite.prepare(`UPDATE events SET status = 'archived', updated_at = ? WHERE id = ?`).run(now, eid)
+    app.sqlite
+      .prepare(`UPDATE settings SET value = '' WHERE key = 'active_event_id' AND value = ?`)
+      .run(eid)
+
+    appendAudit({
+      db: app.sqlite,
+      dataRoot: app.dataRoot,
+      type: 'event_archived',
+      userId: req.user.sub,
+      payload: { id: eid },
+    })
+    return { ok: true }
+  })
+
+  /** @deprecated Nutzt POST /events/:id/complete */
   app.post('/events/:id/close', async (req, reply) => {
     if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
-
     const eid = String((req.params as { id: string }).id)
-
-    app.sqlite.prepare(`UPDATE events SET status='closed', closed_at=? WHERE id=?`).run(Date.now(), eid)
+    const ev = app.sqlite.prepare(`SELECT id FROM events WHERE id = ?`).get(eid) as { id: string } | undefined
+    if (!ev) return reply.code(404).send({ error: 'NOT_FOUND' })
+    const now = Date.now()
+    app.sqlite
+      .prepare(
+        `UPDATE events SET status = 'completed', closed_at = COALESCE(closed_at, ?), updated_at = ? WHERE id = ?`,
+      )
+      .run(now, now, eid)
+    app.sqlite
+      .prepare(`UPDATE settings SET value = '' WHERE key = 'active_event_id' AND value = ?`)
+      .run(eid)
 
     appendAudit({
       db: app.sqlite,
@@ -636,6 +855,7 @@ async function guardedRoutes(app: FastifyInstance) {
           ),
           payment: paymentSchema,
           clientUuid: z.string().optional(),
+          eventId: z.string().nullable().optional(),
         })
         .parse(req.body ?? {})
 
@@ -651,6 +871,7 @@ async function guardedRoutes(app: FastifyInstance) {
         })),
         payment: body.payment,
         clientUuid: body.clientUuid,
+        saleEventId: body.eventId,
       })
     } catch (e) {
       const msg = String((e as Error).message)
@@ -662,6 +883,8 @@ async function guardedRoutes(app: FastifyInstance) {
         'OUT_OF_STOCK',
         'INVALID_TEAM',
         'INVALID_EVENT',
+        'NO_EVENT',
+        'EVENT_NOT_ACTIVE',
       ])
 
       return known.has(msg)
@@ -729,9 +952,16 @@ async function guardedRoutes(app: FastifyInstance) {
       .object({
         dayKey: z.string().optional(),
         actualCashDrawerCents: z.number().int().optional(),
+        eventId: z.string().nullable().optional(),
       })
       .parse(req.body ?? {})
     try {
+      const activeRow = app.sqlite
+        .prepare(`SELECT value FROM settings WHERE key = 'active_event_id'`)
+        .get() as { value: string } | undefined
+      const eventId =
+        b.eventId !== undefined && b.eventId !== null ? b.eventId.trim() || null : activeRow?.value?.trim() || null
+
       const backupRel = createBackup({
         dbPath: app.dbPath,
         dataRoot: app.dataRoot,
@@ -743,6 +973,7 @@ async function guardedRoutes(app: FastifyInstance) {
         user: req.user,
         day: b.dayKey ?? new Date().toISOString().slice(0, 10),
         actualCashDrawerCents: b.actualCashDrawerCents,
+        eventId,
       })
       return { ...closing, backupRel }
     } catch (e) {
@@ -754,7 +985,9 @@ async function guardedRoutes(app: FastifyInstance) {
   app.get('/daily-closings', async () =>
     app.sqlite
       .prepare(
-        `SELECT id, closing_number as closingNumber, day_key as dayKey, period_start as periodStart, period_end as periodEnd, gross_total_cents as grossTotalCents, created_at as createdAt
+        `SELECT id, closing_number as closingNumber, day_key as dayKey,
+          event_id as eventId,
+          period_start as periodStart, period_end as periodEnd, gross_total_cents as grossTotalCents, created_at as createdAt
          FROM day_closings ORDER BY created_at DESC LIMIT 180`,
       )
       .all(),

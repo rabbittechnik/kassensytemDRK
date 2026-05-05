@@ -32,12 +32,6 @@ function payCustomer(p: PaymentMethod): string {
   if (p === 'card') return 'KARTE SIMULIERT'
   return 'AUF RECHNUNG (DEMO)'
 }
-function payServing(p: PaymentMethod): string {
-  if (p === 'cash') return 'BAR SIMULIERT'
-  if (p === 'card') return 'KARTE SIMULIERT'
-  return 'AUF RECHNUNG (DEMO)'
-}
-
 export interface DemoReceiptInput {
   bonNumberLabel: string
   createdAt: number
@@ -80,38 +74,6 @@ export function formatDemoCustomerReceipt(p: DemoReceiptInput): string {
   out.push('Keine echte Zahlung.')
   out.push('Keine Buchung gespeichert.')
   out.push('TSE: DEMO - keine TSE-Transaktion')
-  return out.join('\n')
-}
-
-export function formatDemoServingReceipt(p: DemoReceiptInput): string {
-  const w = WIDTH
-  const out: string[] = []
-  out.push(center('*** DEMO-SERVIERBON ***', w))
-  out.push(center('NICHT AUSGEBEN', w))
-  out.push('')
-  out.push(center('AUSGABE', w))
-  out.push(`BON:     ${p.bonNumberLabel}`)
-  out.push(`ZAHLUNG: ${payServing(p.paymentMethod)}`)
-  if (p.paymentMethod === 'invoice' && p.teamName?.trim()) {
-    out.push(`TEAM:    ${asciiReceipt(p.teamName.trim().toUpperCase())}`)
-  }
-  out.push(fill('-', w))
-  const sorted = [...p.lines].sort((a, b) => {
-    if (a.categorySort !== b.categorySort) return a.categorySort - b.categorySort
-    return a.categoryName.localeCompare(b.categoryName, 'de')
-  })
-  let lastCat = ''
-  for (const l of sorted) {
-    const cat = asciiReceipt(l.categoryName).toUpperCase()
-    if (cat !== lastCat) {
-      if (lastCat) out.push('')
-      out.push(cat)
-      lastCat = cat
-    }
-    out.push(`  ${l.qty}x ${asciiReceipt(l.name).toUpperCase()}`)
-  }
-  out.push(fill('-', w))
-  out.push(center('DEMO - NICHT AUSGEBEN', w))
   return out.join('\n')
 }
 

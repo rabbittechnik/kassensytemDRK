@@ -4,9 +4,11 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 
 import { db } from '../db/database'
+import { defaultOutputGroupForProduct } from '../db/productOutputDefaults'
 import {
   bumpLocalSalePrintSuccess,
   bumpRemoteArchivePrintSuccess,
+  buildOutputReceiptStoredEntries,
   buildReceiptLineModelsFromCatalog,
   completeLocalSaleWithDualReceipts,
   getSetting,
@@ -18,13 +20,14 @@ import type { CartLine, CategoryRow, PaymentMethod, ProductRow } from '../types'
 import type { ReceiptPayload } from '../receipt/escpos'
 import { formatMoney, todayKey } from '../lib/format'
 import { receiptAsPlainText } from '../receipt/escpos'
+import type { ReceiptLineModel } from '../receipt/receiptFormat'
 import {
   downloadTextFile,
   tryBluetoothPrint,
-  tryBluetoothPrintPlainSequence,
+  tryBluetoothPrintPlainBlocks,
   tryBluetoothPrintPlainText,
 } from '../receipt/bluetoothPrint'
-import { printDualReceiptsAfterSale } from '../receipt/printAfterSale'
+import { printCheckoutReceiptsAfterSale } from '../receipt/printAfterSale'
 import { CardPaymentModal } from './CardPaymentModal'
 import { SuccessToast } from './SuccessToast'
 import { ProductVisual } from './productVisual'
@@ -44,13 +47,49 @@ import {
 } from '../demo/demoStore'
 import {
   formatDemoCustomerReceipt,
-  formatDemoServingReceipt,
   formatDemoTestPrint,
 } from '../demo/demoReceipts'
 import { DemoCodeOverlay } from '../demo/DemoCodeOverlay'
 import { logDemoModeAudit } from '../demo/demoAudit'
 import { InstallAppButton } from '../pwa/InstallAppButton'
 import { IosInstallGuide } from '../pwa/IosInstallGuide'
+import { usePwaUpdate } from '../pwa/PwaUpdateProvider'
+import {
+  ReceiptPreviewModal,
+  type DemoPreviewReceiptItem,
+} from './ReceiptPreviewModal'
+
+function RefreshIcon(props: { className?: string }) {
+  return (
+    <svg
+      className={props.className}
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <path d="M21 12a9 9 0 1 1-3-6.7" />
+      <path d="M21 3v6h-6" />
+    </svg>
+  )
+}
+
+function withDemoOutputHeader(text: string): string {
+  return [
+    '*** DEMO-AUSGABE ***',
+    'NICHT AUSGEBEN',
+    '',
+    text.trim(),
+    '',
+    'DEMO - KEIN ECHTER VERKAUF',
+  ].join('\n')
+}
 
 function tabCls(active: boolean) {
   return [
@@ -75,6 +114,7 @@ type PendingSale = {
   }[]
   payment: ApiPaymentBody
   createdAt: number
+  eventId?: string
 }
 
 const OUTBOX_KEY = 'drk:pending-sales:v1'
@@ -106,6 +146,7 @@ export function PosScreen({
   apiJwt,
   onApiLogout,
 }: PosScreenProps) {
+  const { checkForUpdate, applyUpdate } = usePwaUpdate()
   const remoteMode = Boolean(hasApi() && apiJwt)
 
   const dexCategories = useLiveQuery(
@@ -203,6 +244,81 @@ export function PosScreen({
   const [demoCodeOpen, setDemoCodeOpen] = useState(false)
   const [iosGuideOpen, setIosGuideOpen] = useState(false)
 
+  /** Aktive Veranstaltung für Anzeige und event_id bei Verkäufen */
+  const [activeEvent, setActiveEvent] = useState<{
+    id: string
+    name: string
+    startDate: string
+    endDate: string
+  } | null>(null)
+  const [allowSalesWithoutEvent, setAllowSalesWithoutEvent] = useState(true)
+
+  useEffect(() => {
+    let alive = true
+    async function loadEventContext() {
+      if (demoMode) {
+        const today = new Date().toISOString().slice(0, 10)
+        if (!alive) return
+        setActiveEvent({
+          id: 'demo-event',
+          name: 'DEMO-Veranstaltung',
+          startDate: today,
+          endDate: today,
+        })
+        setAllowSalesWithoutEvent(true)
+        return
+      }
+      if (remoteMode && apiJwt) {
+        try {
+          const ev = await apiJson<Record<string, unknown> | null>('/events/active')
+          if (!alive) return
+          if (ev && typeof ev.id === 'string') {
+            setActiveEvent({
+              id: String(ev.id),
+              name: String(ev.name ?? ''),
+              startDate: String(ev.startDate ?? ''),
+              endDate: String(ev.endDate ?? ''),
+            })
+          } else {
+            setActiveEvent(null)
+          }
+          const st = await apiJson<Record<string, string>>('/settings')
+          if (!alive) return
+          setAllowSalesWithoutEvent(st.allow_sales_without_event !== '0')
+        } catch {
+          if (!alive) return
+          setActiveEvent(null)
+        }
+        return
+      }
+      const allow = (await getSetting('allow_sales_without_event')) !== '0'
+      const eid = (await getSetting('active_event_id'))?.trim()
+      if (!alive) return
+      setAllowSalesWithoutEvent(allow)
+      if (eid) {
+        const row = await db.events.get(eid)
+        if (row && row.status === 'active') {
+          setActiveEvent({
+            id: row.id,
+            name: row.name,
+            startDate: row.startDate,
+            endDate: row.endDate,
+          })
+        } else {
+          setActiveEvent(null)
+        }
+      } else {
+        setActiveEvent(null)
+      }
+    }
+    void loadEventContext()
+    const t = window.setInterval(() => void loadEventContext(), 60_000)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+    }
+  }, [remoteMode, apiJwt, demoMode])
+
   const dayKey = useMemo(() => todayKey(), [])
   const salesDex = useLiveQuery(
     () => db.sales.where('dayKey').equals(dayKey).toArray(),
@@ -265,6 +381,11 @@ export function PosScreen({
   }, [])
   const [toast, setToast] = useState<string | null>(null)
   const [printBusy, setPrintBusy] = useState(false)
+  const [pwaCheckBusy, setPwaCheckBusy] = useState(false)
+  const [pwaUpdateOfferOpen, setPwaUpdateOfferOpen] = useState(false)
+  const [demoPreviewOpen, setDemoPreviewOpen] = useState(false)
+  const [demoPreviewReceipts, setDemoPreviewReceipts] = useState<DemoPreviewReceiptItem[]>([])
+  const [demoPreviewSelectedId, setDemoPreviewSelectedId] = useState<string | null>(null)
   const [syncingOutbox, setSyncingOutbox] = useState(false)
 
   const total = useMemo(() => cart.reduce((s, l) => s + l.priceCents * l.qty, 0), [cart])
@@ -273,6 +394,24 @@ export function PosScreen({
     setToast(msg)
     window.setTimeout(() => setToast(null), ms)
   }
+
+  const handlePwaUpdateCheck = useCallback(async () => {
+    setPwaCheckBusy(true)
+    try {
+      const r = await checkForUpdate()
+      if (r === 'offline') {
+        showToast('Updateprüfung nicht möglich – keine Verbindung.', 4200)
+      } else if (r === 'error') {
+        showToast('Update konnte nicht geprüft werden.', 4200)
+      } else if (r === 'current') {
+        showToast('Die App ist aktuell.', 3200)
+      } else {
+        setPwaUpdateOfferOpen(true)
+      }
+    } finally {
+      setPwaCheckBusy(false)
+    }
+  }, [checkForUpdate])
 
   const addProduct = useCallback(
     (productId: string, name: string, priceCents: number) => {
@@ -354,10 +493,13 @@ export function PosScreen({
             const p = prods.find((x) => x.id === id)
             if (!p) return null
             const c = cats.find((x) => x.id === p.categoryId)
+            const og =
+              p.outputGroup ?? defaultOutputGroupForProduct(p.id, p.name)
             return {
               categoryId: p.categoryId,
               categoryName: c?.name ?? 'Sonstige',
               categorySort: c?.sortOrder ?? 999,
+              outputGroup: og,
             }
           }
           const lines = buildDemoLines(snap, lookup)
@@ -366,8 +508,8 @@ export function PosScreen({
           const createdAt = Date.now()
           const teamName = opts?.teamName
           const teamId = opts?.teamId
-          const eventId = opts?.eventId
-          const eventName = opts?.eventName
+          const eventId = opts?.eventId ?? activeEvent?.id
+          const eventName = opts?.eventName ?? activeEvent?.name
           const contactName = opts?.contactName
           const note = opts?.note
           const customer = formatDemoCustomerReceipt({
@@ -378,14 +520,31 @@ export function PosScreen({
             paymentMethod: method,
             teamName,
           })
-          const serving = formatDemoServingReceipt({
-            bonNumberLabel: label,
+          const ctxDemo = await readReceiptFormattingContext()
+          const demoModels: ReceiptLineModel[] = lines.map((l) => ({
+            productId: l.productId,
+            outputGroup: l.outputGroup,
+            name: l.name,
+            qty: l.qty,
+            unitCents: l.unitPriceCents,
+            lineCents: l.lineTotalCents,
+            categoryId: l.categoryId,
+            categoryName: l.categoryName,
+            categorySort: l.categorySort,
+          }))
+          const outputReceipts = buildOutputReceiptStoredEntries(
+            ctxDemo,
+            demoModels,
+            method,
+            demoNo,
             createdAt,
-            lines,
-            totalCents,
-            paymentMethod: method,
+            false,
             teamName,
-          })
+          )
+          const demoOutputReceipts = outputReceipts.map((o) => ({
+            ...o,
+            text: withDemoOutputHeader(o.text),
+          }))
           addDemoSale({
             id: `demo-sale-${crypto.randomUUID()}`,
             demoNo,
@@ -396,7 +555,7 @@ export function PosScreen({
             paymentMethod: method,
             lines,
             customerReceiptText: customer,
-            servingReceiptText: serving,
+            outputReceipts: demoOutputReceipts,
             teamName,
             teamId,
             eventId,
@@ -406,11 +565,42 @@ export function PosScreen({
           })
           setCart([])
 
-          // Druck (best effort) - keine Bumps in echte Tabellen.
-          const skipPrint = opts?.offlineSkipReceiptPrint === true
-          if (!skipPrint) {
+          const width = ctxDemo.widthMm
+          const previewItems: DemoPreviewReceiptItem[] = [
+            {
+              id: `demo-${label}-customer`,
+              type: 'customer',
+              title: 'Kassenbeleg',
+              text: customer,
+              width,
+              canPrint: true,
+            },
+            ...demoOutputReceipts.map((o) => ({
+              id: `demo-${label}-${o.type}`,
+              type: o.type,
+              title:
+                o.type === 'getraenke' ? 'Ausgabe Getränke'
+                : o.type === 'kuchen_suess' ? 'Ausgabe Kuchen / Süßes'
+                : 'Ausgabe Heißes Essen',
+              text: o.text,
+              width,
+              canPrint: true,
+            })),
+          ]
+          setDemoPreviewReceipts(previewItems)
+          setDemoPreviewSelectedId(previewItems[0]?.id ?? null)
+          setDemoPreviewOpen(true)
+
+          const autoPrintDemo = (await getSetting('demoAutoPrintReceipts')) === '1'
+          if (autoPrintDemo) {
             try {
-              await tryBluetoothPrintPlainSequence(customer, serving)
+              const blocks = [
+                customer,
+                ...demoOutputReceipts.map((o) => o.text),
+              ].filter((t) => t.trim().length > 0)
+              if (blocks.length === 1)
+                await tryBluetoothPrintPlainText(blocks[0])
+              else if (blocks.length > 1) await tryBluetoothPrintPlainBlocks(blocks)
             } catch {
               /* ignore */
             }
@@ -439,6 +629,7 @@ export function PosScreen({
             })),
             payment: apiPay,
             clientUuid,
+            eventId: activeEvent?.id ?? null,
           })
           setCart([])
           if (sale.duplicate) {
@@ -450,7 +641,16 @@ export function PosScreen({
           const prods = remoteProducts ?? []
           const models = buildReceiptLineModelsFromCatalog(snap, prods, cats)
           const ctx = await readReceiptFormattingContext()
-          const { customer, serving } = renderDualReceiptTexts(
+          const { customer } = renderDualReceiptTexts(
+            ctx,
+            models,
+            method,
+            sale.receiptNo,
+            sale.createdAt,
+            false,
+            method === 'invoice' ? teamName : undefined,
+          )
+          const outputReceipts = buildOutputReceiptStoredEntries(
             ctx,
             models,
             method,
@@ -465,23 +665,26 @@ export function PosScreen({
             createdAt: sale.createdAt,
             paymentMethod: method,
             totalCents: snap.reduce((s, l) => s + l.priceCents * l.qty, 0),
+            eventId: activeEvent?.id ?? null,
             teamName: method === 'invoice' ? teamName : undefined,
             linesJson: JSON.stringify(models),
             customerReceiptText: customer,
-            servingReceiptText: serving,
+            servingReceiptText: '',
+            outputReceiptsJson: JSON.stringify(outputReceipts),
             printedCustomerReceipt: false,
             printedServingReceipt: false,
             customerReceiptPrintCount: 0,
             servingReceiptPrintCount: 0,
           })
-          const printRes = await printDualReceiptsAfterSale({
+          const printRes = await printCheckoutReceiptsAfterSale({
             customerText: customer,
-            servingText: serving,
+            outputReceipts,
             receiptNo: sale.receiptNo,
             skipAutoPrint: false,
             bumps: {
               bumpCustomer: async () => bumpRemoteArchivePrintSuccess(archiveId, 'customer'),
-              bumpServing: async () => bumpRemoteArchivePrintSuccess(archiveId, 'serving'),
+              bumpOutput: async (station) =>
+                bumpRemoteArchivePrintSuccess(archiveId, station),
             },
           })
           if (printRes.hadFailure) showToast(printRes.message, 5000)
@@ -489,17 +692,20 @@ export function PosScreen({
           else showToast('Verbucht (Server).', 2600)
         } else {
           if (method === 'invoice') throw new Error('Rechnung nur mit Server-API.')
-          const r = await completeLocalSaleWithDualReceipts(snap, method)
+          const r = await completeLocalSaleWithDualReceipts(snap, method, {
+            eventId: activeEvent?.id ?? null,
+          })
           setCart([])
           const skipPrint = opts?.offlineSkipReceiptPrint === true && method === 'cash'
-          const printRes = await printDualReceiptsAfterSale({
+          const printRes = await printCheckoutReceiptsAfterSale({
             customerText: r.customerReceiptText,
-            servingText: r.servingReceiptText,
+            outputReceipts: r.outputReceipts,
             receiptNo: r.receiptNo,
             skipAutoPrint: skipPrint,
             bumps: {
               bumpCustomer: async () => bumpLocalSalePrintSuccess(r.saleId, 'customer'),
-              bumpServing: async () => bumpLocalSalePrintSuccess(r.saleId, 'serving'),
+              bumpOutput: async (station) =>
+                bumpLocalSalePrintSuccess(r.saleId, station),
             },
           })
           if (printRes.hadFailure) showToast(printRes.message, 5000)
@@ -526,6 +732,7 @@ export function PosScreen({
             })),
             payment: apiPay,
             createdAt: Date.now(),
+            eventId: activeEvent?.id,
           }
           writeOutbox([...readOutbox(), pending])
           setCart([])
@@ -535,7 +742,16 @@ export function PosScreen({
         showToast(String((e as Error).message ?? e), 5000)
       }
     },
-    [cart, total, remoteMode, remoteCategories, remoteProducts, dexCategories, dexProducts],
+    [
+      cart,
+      total,
+      remoteMode,
+      remoteCategories,
+      remoteProducts,
+      dexCategories,
+      dexProducts,
+      activeEvent,
+    ],
   )
 
   const syncOutbox = useCallback(async () => {
@@ -551,6 +767,7 @@ export function PosScreen({
           lines: it.lines,
           payment: it.payment,
           clientUuid: it.clientUuid,
+          eventId: it.eventId ?? null,
         })
         okCount += 1
       } catch {
@@ -690,6 +907,41 @@ export function PosScreen({
           )}
         </div>
       )}
+      <div
+        className={[
+          'border-b px-3 py-2.5 text-center text-[13px] font-semibold leading-snug',
+          activeEvent
+            ? 'border-emerald-500/40 bg-emerald-950/35 text-emerald-50'
+            : allowSalesWithoutEvent
+              ? 'border-amber-500/40 bg-amber-950/35 text-amber-100'
+              : 'border-rose-500/50 bg-rose-950/40 text-rose-100',
+        ].join(' ')}
+      >
+        {activeEvent ? (
+          <>
+            Aktive Veranstaltung:{' '}
+            <span className="font-black">{activeEvent.name}</span>
+            {' · Zeitraum '}
+            {format(new Date(activeEvent.startDate + 'T12:00:00'), 'dd.MM.yyyy', {
+              locale: de,
+            })}{' '}
+            –{' '}
+            {format(new Date(activeEvent.endDate + 'T12:00:00'), 'dd.MM.yyyy', {
+              locale: de,
+            })}
+          </>
+        ) : allowSalesWithoutEvent ? (
+          <>
+            Keine aktive Veranstaltung ausgewählt – Sie können im Standardmodus verkaufen (oder im
+            Admin eine Veranstaltung aktivieren).
+          </>
+        ) : (
+          <>
+            Keine aktive Veranstaltung – Verkauf ist erst möglich, wenn im Admin eine Veranstaltung
+            aktiv ist oder der Standardmodus ohne Veranstaltung erlaubt wird.
+          </>
+        )}
+      </div>
       <header className="flex flex-shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[#ff003c]/40 px-4 py-3 md:px-6">
         <div className="min-w-0">
           <div className="flex flex-wrap items-baseline gap-2">
@@ -1032,6 +1284,16 @@ export function PosScreen({
             )}
             <button
               type="button"
+              disabled={pwaCheckBusy}
+              onClick={() => void handlePwaUpdateCheck()}
+              className="inline-flex items-center gap-1.5 rounded-lg border-2 border-[#ff003c]/55 border-t-[#FFD700]/55 bg-neutral-950 px-3 py-2 text-xs font-bold uppercase text-[#FFD700] shadow-[0_0_14px_rgba(255,0,60,0.15)] hover:bg-black disabled:opacity-40"
+              title="Neue App-Version vom Server laden (ohne Kassendaten zu löschen)"
+            >
+              <RefreshIcon className={pwaCheckBusy ? 'animate-spin' : ''} />
+              {pwaCheckBusy ? 'Prüfe…' : 'Update prüfen'}
+            </button>
+            <button
+              type="button"
               onClick={() => onOpenAdmin()}
               className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
@@ -1099,6 +1361,7 @@ export function PosScreen({
         <InvoiceSaleModal
           cartLines={cart}
           totalCents={total}
+          defaultEventId={activeEvent?.id}
           onCancel={() => setInvoiceOpen(false)}
           onConfirmed={async (p) => {
             await settleAndPrint(
@@ -1123,6 +1386,87 @@ export function PosScreen({
           }}
         />
       )}
+
+      {pwaUpdateOfferOpen ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/85 p-4 backdrop-blur-sm"
+          role="dialog"
+          aria-modal
+          aria-labelledby="pwa-update-title"
+        >
+          <div className="panel-glass w-full max-w-md rounded-2xl border-2 border-[#ff003c]/50 p-6 shadow-[0_0_40px_rgba(255,215,0,0.12)]">
+            <h2
+              id="pwa-update-title"
+              className="text-lg font-black uppercase tracking-wide text-[#FFD700]"
+            >
+              Neue Version
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-200">
+              Neue Version verfügbar. Jetzt aktualisieren? Es werden nur
+              App-Dateien neu geladen – Verkäufe, Bons und Einstellungen bleiben
+              erhalten (IndexedDB / Server).
+            </p>
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-slate-300 hover:bg-white/5"
+                onClick={() => setPwaUpdateOfferOpen(false)}
+              >
+                Später
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border-2 border-[#FFD700]/60 bg-gradient-to-r from-[#ff003c]/90 to-rose-700/90 px-4 py-2 text-sm font-black uppercase text-white hover:opacity-95"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await applyUpdate()
+                    } catch {
+                      showToast('Update konnte nicht angewendet werden.', 4500)
+                    }
+                  })()
+                }}
+              >
+                Jetzt aktualisieren
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      <ReceiptPreviewModal
+        open={demoPreviewOpen}
+        receipts={demoPreviewReceipts}
+        selectedId={demoPreviewSelectedId}
+        onSelect={setDemoPreviewSelectedId}
+        onClose={() => setDemoPreviewOpen(false)}
+        onPrintCurrent={() => {
+          const current = demoPreviewReceipts.find((r) => r.id === demoPreviewSelectedId)
+          if (!current) return
+          void (async () => {
+            const res = await tryBluetoothPrintPlainText(current.text)
+            if (res.ok) showToast('Demo-Bon testweise gedruckt.', 2400)
+            else showToast(`Druck fehlgeschlagen: ${res.message}`, 4200)
+          })()
+        }}
+        onPrintAll={() => {
+          void (async () => {
+            const blocks = demoPreviewReceipts.map((r) => r.text).filter((x) => x.trim())
+            if (blocks.length === 0) return
+            const res = await tryBluetoothPrintPlainBlocks(blocks)
+            if (res.ok) showToast('Alle Demo-Bons testweise gedruckt.', 2600)
+            else showToast(`Druck fehlgeschlagen: ${res.message}`, 4200)
+          })()
+        }}
+        onCopyCurrent={() => {
+          const current = demoPreviewReceipts.find((r) => r.id === demoPreviewSelectedId)
+          if (!current) return
+          void navigator.clipboard
+            .writeText(current.text)
+            .then(() => showToast('Bontext kopiert.', 1800))
+            .catch(() => showToast('Kopieren fehlgeschlagen.', 2600))
+        }}
+      />
 
       {toast && <SuccessToast message={toast} />}
 

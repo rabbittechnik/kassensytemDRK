@@ -29,7 +29,8 @@ export interface TeamInvoiceDetailsModel {
   summaryRows: TeamInvoiceSummaryRow[]
   /** Demo: zusammengeführter Text für Vorschau */
   demoCustomerReceiptText?: string
-  demoServingReceiptText?: string
+  /** Demo: alle Stations-Ausgabe-Bons nacheinander */
+  demoOutputReceiptTexts?: string
 }
 
 export function formatBonLabel(createdAtMs: number, receiptNo: number): string {
@@ -99,8 +100,9 @@ export function buildTeamInvoiceDetailsFromDemo(
     .filter(Boolean)
     .join('\n\n──────────\n\n')
 
-  const demoServingReceiptText = sorted
-    .map((s) => s.servingReceiptText?.trim())
+  const demoOutputReceiptTexts = sorted
+    .flatMap((s) => s.outputReceipts ?? [])
+    .map((r) => r.text?.trim())
     .filter(Boolean)
     .join('\n\n──────────\n\n')
 
@@ -115,7 +117,7 @@ export function buildTeamInvoiceDetailsFromDemo(
     detailLines,
     summaryRows: aggregateSummary(detailLines),
     demoCustomerReceiptText: demoCustomerReceiptText || undefined,
-    demoServingReceiptText: demoServingReceiptText || undefined,
+    demoOutputReceiptTexts: demoOutputReceiptTexts || undefined,
   }
 }
 

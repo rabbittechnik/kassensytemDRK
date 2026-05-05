@@ -99,4 +99,7 @@ export function seedIfNeeded(
     ['issuer_snapshot', JSON.stringify(DEFAULT_ISSUER)],
   ]
   for (const [k, v] of defs) ins.run(k, v)
+
+  ins.run('active_event_id', '')
+  ins.run('allow_sales_without_event', '1')
 }

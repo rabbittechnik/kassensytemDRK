@@ -1,11 +1,14 @@
 import { asciiReceipt, formatMoney } from '../lib/format'
-import type { PaymentMethod } from '../types'
+import type { OutputStationKey, PaymentMethod, ProductOutputGroup } from '../types'
 
 export const RECEIPT_COPY_HEADER = '*** KOPIE / NACHDRUCK ***'
 
 export type ReceiptFormatType = 'customer' | 'serving'
 
 export interface ReceiptLineModel {
+  /** Für Ausgabe-Bons-Zusammenführung */
+  productId?: string
+  outputGroup?: ProductOutputGroup
   name: string
   qty: number
   unitCents: number
@@ -13,6 +16,45 @@ export interface ReceiptLineModel {
   categoryId: string
   categoryName: string
   categorySort: number
+}
+
+/** Reihenfolge beim Drucken mehrerer Ausgabe-Bons. */
+export const OUTPUT_STATION_ORDER: OutputStationKey[] = [
+  'getraenke',
+  'kuchen_suess',
+  'heisses_essen',
+]
+
+const OUTPUT_STATION_BANNER: Record<OutputStationKey, string> = {
+  getraenke: 'AUSGABE GETRÄNKE',
+  kuchen_suess: 'AUSGABE KUCHEN/SÜSS',
+  heisses_essen: 'AUSGABE HEISSES ESSEN',
+}
+
+const OUTPUT_STATION_FOOTER: Record<OutputStationKey, string> = {
+  getraenke: 'GETRÄNKE AUSGEBEN',
+  kuchen_suess: 'KUCHEN AUSGEBEN',
+  heisses_essen: 'ESSEN AUSGEBEN',
+}
+
+export function isOutputStationGroup(g?: ProductOutputGroup): g is OutputStationKey {
+  return g === 'getraenke' || g === 'kuchen_suess' || g === 'heisses_essen'
+}
+
+export interface FormatOutputStationReceiptParams {
+  station: OutputStationKey
+  widthMm: 58 | 80
+  isReprint: boolean
+  orgTitle: string
+  bonNumberLabel: string
+  createdAt: number
+  payment: PaymentMethod
+  teamName?: string
+  lines: { name: string; qty: number }[]
+}
+
+export function outputStationStoredTitle(station: OutputStationKey): string {
+  return OUTPUT_STATION_BANNER[station]
 }
 
 export interface FormatReceiptParams {
@@ -53,6 +95,49 @@ function padCenter(s: string, w: number): string {
 
 function fillLine(ch: string, w: number): string {
   return ch.repeat(Math.max(0, w)).slice(0, w)
+}
+
+function payLabelOutputStation(p: PaymentMethod): string {
+  if (p === 'cash') return 'BAR BEZAHLT'
+  if (p === 'card') return 'KARTE BEZAHLT'
+  return 'AUF RECHNUNG'
+}
+
+/**
+ * Ein Ausgabe-Bon für Getränke / Kuchen / heißes Essen — ohne Einzelpreise.
+ */
+export function formatOutputStationReceipt(p: FormatOutputStationReceiptParams): string {
+  const w = receiptCharWidth(p.widthMm)
+  const lines: string[] = []
+  const eq = fillLine('=', w)
+  if (p.isReprint) {
+    lines.push(padCenter(RECEIPT_COPY_HEADER, w))
+    lines.push('')
+  }
+  lines.push(eq)
+  lines.push(padCenter(OUTPUT_STATION_BANNER[p.station], w))
+  lines.push(padCenter(asciiReceipt(p.orgTitle).toUpperCase(), w))
+  lines.push(eq)
+  lines.push(`BON: ${p.bonNumberLabel}`)
+  lines.push(
+    `ZEIT: ${new Intl.DateTimeFormat('de-DE', { timeStyle: 'short' }).format(new Date(p.createdAt))}`,
+  )
+  lines.push(`ZAHLUNG: ${payLabelOutputStation(p.payment)}`)
+  if (p.payment === 'invoice') {
+    if (p.teamName?.trim()) {
+      lines.push(`TEAM: ${asciiReceipt(p.teamName.trim().toUpperCase())}`)
+    }
+    lines.push(padCenter('NICHT KASSIEREN', w))
+    lines.push(padCenter('AUF TEAMRECHNUNG GEBUCHT', w))
+  }
+  lines.push(fillLine('-', w))
+  for (const row of p.lines) {
+    lines.push(`  ${row.qty}x ${asciiReceipt(row.name).toUpperCase()}`)
+  }
+  lines.push(fillLine('-', w))
+  lines.push(padCenter(OUTPUT_STATION_FOOTER[p.station], w))
+  lines.push(eq)
+  return lines.join('\n')
 }
 
 function wrapAscii(text: string, w: number): string[] {

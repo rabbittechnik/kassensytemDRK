@@ -29,6 +29,8 @@ type EventRow = {
 export function InvoiceSaleModal(props: {
   cartLines: CartLine[]
   totalCents: number
+  /** Aktuelle Kassen-Veranstaltung – wird für Auf-Rechnung vorausgewählt. */
+  defaultEventId?: string
   onCancel: () => void
   onConfirmed: (p: {
     teamId: string
@@ -40,7 +42,7 @@ export function InvoiceSaleModal(props: {
   }) => void | Promise<void>
 }) {
 
-  const { cartLines, totalCents, onCancel, onConfirmed } = props
+  const { cartLines, totalCents, onCancel, onConfirmed, defaultEventId } = props
   const demoMode = useDemoMode()
   const demoTeams = useDemoTeams()
 
@@ -133,14 +135,16 @@ export function InvoiceSaleModal(props: {
         if (!alive) return
         const act = ev.filter((e) => e.status === 'active')
         setApiEvents(act)
-        if (act.length === 1) setEventId(act[0].id)
+        if (defaultEventId && act.some((x) => x.id === defaultEventId)) {
+          setEventId(defaultEventId)
+        } else if (act.length === 1) setEventId(act[0].id)
       })
       .catch(() => {})
 
     return () => {
       alive = false
     }
-  }, [demoMode])
+  }, [demoMode, defaultEventId])
 
   useEffect(() => {
     if (demoMode) return

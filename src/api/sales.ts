@@ -20,6 +20,8 @@ export async function apiCreateSale(params: {
   }[]
   payment: ApiPaymentBody
   clientUuid?: string
+  /** Bar/Karte: aktive Veranstaltung (Server validiert gegen Settings). */
+  eventId?: string | null
 }) {
   return apiJson<{
     id: string
@@ -29,6 +31,11 @@ export async function apiCreateSale(params: {
     duplicate?: boolean
   }>('/sales', {
     method: 'POST',
-    body: JSON.stringify(params),
+    body: JSON.stringify({
+      lines: params.lines,
+      payment: params.payment,
+      clientUuid: params.clientUuid,
+      eventId: params.eventId,
+    }),
   })
 }

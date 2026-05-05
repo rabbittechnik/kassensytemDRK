@@ -34,6 +34,13 @@ function dayKey(ts: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
+function getSetting(db: BetterSqlite3.Database, key: string): string | undefined {
+  const r = db
+    .prepare(`SELECT value FROM settings WHERE key = ?`)
+    .get(key) as { value: string } | undefined
+  return r?.value
+}
+
 export async function createSale(params: {
   db: BetterSqlite3.Database
   dataRoot: string
@@ -41,6 +48,8 @@ export async function createSale(params: {
   lines: CartLineBody[]
   payment: PaymentBody
   clientUuid?: string
+  /** Bar/Karte: aus Client oder Fallback aktiv_event_id; bei Rechnung ignoriert (payment.eventId). */
+  saleEventId?: string | null
 }): Promise<{
   id: string
   receiptNo: number
@@ -50,6 +59,27 @@ export async function createSale(params: {
 }> {
   const { db, lines, payment, user, clientUuid } = params
   const startedAt = Date.now()
+
+  const allowNoEvent = getSetting(db, 'allow_sales_without_event') !== '0'
+  const activeFromSettings = getSetting(db, 'active_event_id')?.trim() ?? ''
+
+  let eventId: string | null = null
+  if (payment.method === 'invoice') {
+    eventId = payment.eventId
+  } else {
+    const explicit = params.saleEventId?.trim()
+    eventId = explicit || activeFromSettings || null
+  }
+
+  if (!eventId) {
+    if (!allowNoEvent) throw new Error('NO_EVENT')
+  } else {
+    const ev = db
+      .prepare(`SELECT status FROM events WHERE id = ?`)
+      .get(eventId) as { status: string } | undefined
+    if (!ev) throw new Error('INVALID_EVENT')
+    if (ev.status !== 'active') throw new Error('EVENT_NOT_ACTIVE')
+  }
 
   if (lines.length === 0) throw new Error('EMPTY_CART')
 
@@ -107,18 +137,12 @@ export async function createSale(params: {
   }
 
   const teamId = payment.method === 'invoice' ? payment.teamId : null
-  const eventId = payment.method === 'invoice' ? payment.eventId : null
 
   if (payment.method === 'invoice') {
     const team = db
       .prepare(`SELECT active FROM teams WHERE id = ?`)
       .get(teamId) as { active: number } | undefined
     if (!team || !team.active) throw new Error('INVALID_TEAM')
-
-    const ev = db
-      .prepare(`SELECT status FROM events WHERE id = ?`)
-      .get(eventId) as { status: string } | undefined
-    if (!ev || ev.status !== 'active') throw new Error('INVALID_EVENT')
   }
 
   const usr = db

@@ -1,12 +1,24 @@
 import { db } from './database'
+import { defaultOutputGroupForProduct } from './productOutputDefaults'
 import type { CartLine, CategoryRow, ProductRow } from '../types'
-import type { DualReceiptArchiveRow, PaymentMethod, ReceiptReprintLogRow } from '../types'
+import type {
+  DualReceiptArchiveRow,
+  OutputReceiptStored,
+  OutputStationKey,
+  PaymentMethod,
+  ProductOutputGroup,
+  ReceiptReprintKind,
+  ReceiptReprintLogRow,
+} from '../types'
 import { todayKey } from '../lib/format'
 import {
   type FormatReceiptParams,
+  OUTPUT_STATION_ORDER,
   formatBonNumber,
+  formatOutputStationReceipt,
   formatReceipt,
   type ReceiptLineModel,
+  outputStationStoredTitle,
 } from '../receipt/receiptFormat'
 
 function uid(): string {
@@ -29,6 +41,11 @@ export async function setSetting(key: string, value: string): Promise<void> {
   await db.settings.put({ key, value })
 }
 
+function modelProductOutputGroup(p: ProductRow | undefined): ProductOutputGroup {
+  if (p?.id) return p.outputGroup ?? defaultOutputGroupForProduct(p.id, p.name)
+  return 'keine_ausgabe'
+}
+
 export function buildReceiptLineModelsFromCatalog(
   lines: CartLine[],
   products: ProductRow[],
@@ -38,6 +55,8 @@ export function buildReceiptLineModelsFromCatalog(
     const p = products.find((x) => x.id === l.productId)
     const c = p ? categories.find((x) => x.id === p.categoryId) : undefined
     return {
+      productId: l.productId,
+      outputGroup: modelProductOutputGroup(p),
       name: l.name,
       qty: l.qty,
       unitCents: l.priceCents,
@@ -55,6 +74,8 @@ export async function buildReceiptLineModels(lines: CartLine[]): Promise<Receipt
     const p = await db.products.get(l.productId)
     const c = p ? await db.categories.get(p.categoryId) : undefined
     out.push({
+      productId: l.productId,
+      outputGroup: modelProductOutputGroup(p),
       name: l.name,
       qty: l.qty,
       unitCents: l.priceCents,
@@ -127,27 +148,98 @@ export function renderDualReceiptTexts(
 ): { customer: string; serving: string } {
   return {
     customer: formatReceipt(
-      buildFormatParams(ctx, models, paymentMethod, receiptNo, createdAt, isReprint, teamName, 'customer'),
+      buildFormatParams(
+        ctx,
+        models,
+        paymentMethod,
+        receiptNo,
+        createdAt,
+        isReprint,
+        teamName,
+        'customer',
+      ),
     ),
     serving: formatReceipt(
-      buildFormatParams(ctx, models, paymentMethod, receiptNo, createdAt, isReprint, teamName, 'serving'),
+      buildFormatParams(
+        ctx,
+        models,
+        paymentMethod,
+        receiptNo,
+        createdAt,
+        isReprint,
+        teamName,
+        'serving',
+      ),
     ),
   }
 }
 
+/** Zeilen ohne Preise für eine Ausgabestelle, zusammengefasst nach Artikel-ID. */
+export function aggregateLinesForOutputStation(
+  models: ReceiptLineModel[],
+  station: OutputStationKey,
+): { name: string; qty: number }[] {
+  const acc = new Map<string, { name: string; qty: number }>()
+  for (const m of models) {
+    const g = m.outputGroup ?? 'keine_ausgabe'
+    if (g !== station) continue
+    const key = m.productId ?? `${m.name}|${m.unitCents}`
+    const cur = acc.get(key)
+    if (cur) cur.qty += m.qty
+    else acc.set(key, { name: m.name, qty: m.qty })
+  }
+  return [...acc.values()].sort((a, b) => a.name.localeCompare(b.name, 'de'))
+}
+
+export function buildOutputReceiptStoredEntries(
+  ctx: Awaited<ReturnType<typeof readReceiptFormattingContext>>,
+  models: ReceiptLineModel[],
+  paymentMethod: PaymentMethod,
+  receiptNo: number,
+  createdAt: number,
+  isReprint: boolean,
+  teamName?: string,
+): OutputReceiptStored[] {
+  const label = formatBonNumber(createdAt, receiptNo)
+  const list: OutputReceiptStored[] = []
+  for (const station of OUTPUT_STATION_ORDER) {
+    const agg = aggregateLinesForOutputStation(models, station)
+    if (agg.length === 0) continue
+    const text = formatOutputStationReceipt({
+      station,
+      widthMm: ctx.widthMm,
+      isReprint,
+      orgTitle: ctx.orgTitle,
+      bonNumberLabel: label,
+      createdAt,
+      payment: paymentMethod,
+      teamName,
+      lines: agg,
+    })
+    list.push({
+      type: station,
+      title: outputStationStoredTitle(station),
+      text,
+      printed: false,
+      print_count: 0,
+    })
+  }
+  return list
+}
+
 /**
- * Lokaler Verkauf (Bar/Karte): Verkauf speichern, Kunden- und Servierbon erzeugen und am Verkauf ablegen.
+ * Lokaler Verkauf (Bar/Karte): Verkauf speichern; Kundenbon + Stations-Ausgabe-Bons.
  */
 export async function completeLocalSaleWithDualReceipts(
   lines: CartLine[],
   paymentMethod: 'cash' | 'card',
-  opts?: { invoiceTeamName?: string },
+  opts?: { invoiceTeamName?: string; eventId?: string | null },
 ): Promise<{
   saleId: string
   receiptNo: number
   createdAt: number
   customerReceiptText: string
-  servingReceiptText: string
+  outputReceipts: OutputReceiptStored[]
 }> {
   const totalCents = lines.reduce((s, l) => s + l.priceCents * l.qty, 0)
   const createdAt = Date.now()
@@ -158,7 +250,19 @@ export async function completeLocalSaleWithDualReceipts(
 
   await db.transaction('rw', db.sales, db.saleLines, db.settings, async () => {
     const receiptNo = await getNextReceiptNoInTx()
-    const { customer, serving } = renderDualReceiptTexts(
+    const customer = formatReceipt(
+      buildFormatParams(
+        ctx,
+        models,
+        paymentMethod,
+        receiptNo,
+        createdAt,
+        false,
+        opts?.invoiceTeamName,
+        'customer',
+      ),
+    )
+    const outputReceipts = buildOutputReceiptStoredEntries(
       ctx,
       models,
       paymentMethod,
@@ -175,12 +279,14 @@ export async function completeLocalSaleWithDualReceipts(
       paymentMethod,
       receiptNo,
       customerReceiptText: customer,
-      servingReceiptText: serving,
+      servingReceiptText: '',
+      outputReceiptsJson: JSON.stringify(outputReceipts),
       printedCustomerReceipt: false,
       printedServingReceipt: false,
       customerReceiptPrintCount: 0,
       servingReceiptPrintCount: 0,
       invoiceTeamNameSnapshot: opts?.invoiceTeamName,
+      ...(opts?.eventId ? { eventId: opts.eventId } : {}),
     })
     for (const l of lines) {
       const cat = await db.products.get(l.productId)
@@ -199,13 +305,23 @@ export async function completeLocalSaleWithDualReceipts(
   })
 
   const row = await db.sales.get(saleId)
-  if (!row) throw new Error('SALE_NOT_FOUND')
+  if (!row?.outputReceiptsJson || !row.customerReceiptText)
+    throw new Error('SALE_NOT_FOUND')
+
+  let outputReceipts: OutputReceiptStored[] = []
+  try {
+    outputReceipts = JSON.parse(row.outputReceiptsJson) as OutputReceiptStored[]
+    if (!Array.isArray(outputReceipts)) outputReceipts = []
+  } catch {
+    outputReceipts = []
+  }
+
   return {
     saleId,
     receiptNo: row.receiptNo,
     createdAt,
     customerReceiptText: row.customerReceiptText ?? '',
-    servingReceiptText: row.servingReceiptText ?? '',
+    outputReceipts,
   }
 }
 
@@ -237,9 +353,23 @@ export async function appendReceiptReprintLog(
   await db.receiptReprintLogs.add(entry)
 }
 
+async function hydrateModelsOutputGroup(models: ReceiptLineModel[]): Promise<ReceiptLineModel[]> {
+  for (const m of models) {
+    if (m.outputGroup != null) continue
+    const pid = m.productId
+    if (pid) {
+      const p = await db.products.get(pid)
+      m.outputGroup = p?.outputGroup ?? defaultOutputGroupForProduct(pid, m.name)
+    } else {
+      m.outputGroup = 'keine_ausgabe'
+    }
+  }
+  return models
+}
+
 export async function bumpLocalSalePrintSuccess(
   saleId: string,
-  which: 'customer' | 'serving',
+  which: ReceiptReprintKind,
 ): Promise<void> {
   const s = await db.sales.get(saleId)
   if (!s) return
@@ -248,30 +378,74 @@ export async function bumpLocalSalePrintSuccess(
       printedCustomerReceipt: true,
       customerReceiptPrintCount: (s.customerReceiptPrintCount ?? 0) + 1,
     })
-  } else {
+    return
+  }
+  if (which === 'serving') {
     await db.sales.update(saleId, {
       printedServingReceipt: true,
       servingReceiptPrintCount: (s.servingReceiptPrintCount ?? 0) + 1,
     })
+    return
+  }
+  const raw = s.outputReceiptsJson
+  if (!raw?.trim()) return
+  try {
+    const arr = JSON.parse(raw) as OutputReceiptStored[]
+    if (!Array.isArray(arr)) return
+    const next = arr.map((e) =>
+      e.type === which ?
+        {
+          ...e,
+          printed: true,
+          print_count: (e.print_count ?? 0) + 1,
+        }
+      : e,
+    )
+    await db.sales.update(saleId, { outputReceiptsJson: JSON.stringify(next) })
+  } catch {
+    /* ignore */
   }
 }
 
 export async function bumpRemoteArchivePrintSuccess(
   archiveId: string,
-  which: 'customer' | 'serving',
+  which: ReceiptReprintKind,
 ): Promise<void> {
-  const s = await db.dualReceiptArchive.get(archiveId)
-  if (!s) return
+  const row = await db.dualReceiptArchive.get(archiveId)
+  if (!row) return
   if (which === 'customer') {
     await db.dualReceiptArchive.update(archiveId, {
       printedCustomerReceipt: true,
-      customerReceiptPrintCount: (s.customerReceiptPrintCount ?? 0) + 1,
+      customerReceiptPrintCount: (row.customerReceiptPrintCount ?? 0) + 1,
     })
-  } else {
+    return
+  }
+  if (which === 'serving') {
     await db.dualReceiptArchive.update(archiveId, {
       printedServingReceipt: true,
-      servingReceiptPrintCount: (s.servingReceiptPrintCount ?? 0) + 1,
+      servingReceiptPrintCount: (row.servingReceiptPrintCount ?? 0) + 1,
     })
+    return
+  }
+  const raw = row.outputReceiptsJson
+  if (!raw?.trim()) return
+  try {
+    const arr = JSON.parse(raw) as OutputReceiptStored[]
+    if (!Array.isArray(arr)) return
+    const next = arr.map((e) =>
+      e.type === which ?
+        {
+          ...e,
+          printed: true,
+          print_count: (e.print_count ?? 0) + 1,
+        }
+      : e,
+    )
+    await db.dualReceiptArchive.update(archiveId, {
+      outputReceiptsJson: JSON.stringify(next),
+    })
+  } catch {
+    /* ignore */
   }
 }
 
@@ -280,7 +454,10 @@ export async function loadSaleLinesForReceipt(saleId: string): Promise<ReceiptLi
   const out: ReceiptLineModel[] = []
   for (const l of lines) {
     const c = await db.categories.get(l.categoryId)
+    const p = await db.products.get(l.productId)
     out.push({
+      productId: l.productId,
+      outputGroup: modelProductOutputGroup(p),
       name: l.name,
       qty: l.qty,
       unitCents: l.unitPriceCents,
@@ -295,13 +472,49 @@ export async function loadSaleLinesForReceipt(saleId: string): Promise<ReceiptLi
 
 export async function formatReprintTextForLocalSale(
   saleId: string,
-  which: 'customer' | 'serving',
+  which: ReceiptReprintKind,
 ): Promise<string | null> {
   const sale = await db.sales.get(saleId)
-  if (!sale?.customerReceiptText || !sale.servingReceiptText) return null
+  if (!sale) return null
+
   const models = await loadSaleLinesForReceipt(saleId)
   const ctx = await readReceiptFormattingContext()
-  const { customer, serving } = renderDualReceiptTexts(
+
+  if (which === 'customer') {
+    if (!sale.customerReceiptText?.trim()) return null
+    return formatReceipt(
+      buildFormatParams(
+        ctx,
+        models,
+        sale.paymentMethod,
+        sale.receiptNo,
+        sale.createdAt,
+        true,
+        sale.invoiceTeamNameSnapshot,
+        'customer',
+      ),
+    )
+  }
+
+  if (which === 'serving') {
+    const legacy = sale.servingReceiptText?.trim()
+    if (!legacy) return null
+    return formatReceipt(
+      buildFormatParams(
+        ctx,
+        models,
+        sale.paymentMethod,
+        sale.receiptNo,
+        sale.createdAt,
+        true,
+        sale.invoiceTeamNameSnapshot,
+        'serving',
+      ),
+    )
+  }
+
+  const station = which as OutputStationKey
+  const rebuilt = buildOutputReceiptStoredEntries(
     ctx,
     models,
     sale.paymentMethod,
@@ -310,12 +523,12 @@ export async function formatReprintTextForLocalSale(
     true,
     sale.invoiceTeamNameSnapshot,
   )
-  return which === 'customer' ? customer : serving
+  return rebuilt.find((e) => e.type === station)?.text ?? null
 }
 
 export async function formatReprintTextForRemoteArchive(
   archiveId: string,
-  which: 'customer' | 'serving',
+  which: ReceiptReprintKind,
 ): Promise<string | null> {
   const row = await db.dualReceiptArchive.get(archiveId)
   if (!row?.linesJson) return null
@@ -326,8 +539,43 @@ export async function formatReprintTextForRemoteArchive(
   } catch {
     return null
   }
+  await hydrateModelsOutputGroup(models)
   const ctx = await readReceiptFormattingContext()
-  const { customer, serving } = renderDualReceiptTexts(
+
+  if (which === 'customer') {
+    if (!row.customerReceiptText?.trim()) return null
+    return formatReceipt(
+      buildFormatParams(
+        ctx,
+        models,
+        row.paymentMethod,
+        row.receiptNo,
+        row.createdAt,
+        true,
+        row.teamName,
+        'customer',
+      ),
+    )
+  }
+
+  if (which === 'serving') {
+    if (!row.servingReceiptText?.trim()) return null
+    return formatReceipt(
+      buildFormatParams(
+        ctx,
+        models,
+        row.paymentMethod,
+        row.receiptNo,
+        row.createdAt,
+        true,
+        row.teamName,
+        'serving',
+      ),
+    )
+  }
+
+  const station = which as OutputStationKey
+  const rebuilt = buildOutputReceiptStoredEntries(
     ctx,
     models,
     row.paymentMethod,
@@ -336,5 +584,5 @@ export async function formatReprintTextForRemoteArchive(
     true,
     row.teamName,
   )
-  return which === 'customer' ? customer : serving
+  return rebuilt.find((e) => e.type === station)?.text ?? null
 }

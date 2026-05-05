@@ -1,5 +1,30 @@
 export type PaymentMethod = 'cash' | 'card' | 'invoice'
 
+/** Zuordnung zu Ausgabestellen für Servier-/Ausgabe-Bons (nicht gleich Produkt-Kategorie). */
+export type ProductOutputGroup =
+  | 'getraenke'
+  | 'kuchen_suess'
+  | 'heisses_essen'
+  | 'keine_ausgabe'
+
+/** Stations-Bons ohne «keine Ausgabe». */
+export type OutputStationKey = 'getraenke' | 'kuchen_suess' | 'heisses_essen'
+
+/** Pro Verkauf persistierte Ausgabe-Bons. */
+export interface OutputReceiptStored {
+  type: OutputStationKey
+  title: string
+  text: string
+  printed: boolean
+  print_count: number
+}
+
+/** Nachdruck / Protokoll: Kundenbon, je Station oder alter Servierbon. */
+export type ReceiptReprintKind =
+  | 'customer'
+  | 'serving'
+  | OutputStationKey
+
 export interface CartLine {
   key: string
   productId: string
@@ -23,9 +48,29 @@ export interface ProductRow {
   sortOrder: number
   /** z.B. `/assets/products/wasser.png`; leer: Emoji oder Dateiname aus Artikel-ID */
   imageUrl?: string | null
+  /** Ausgabegruppe für getrennte Ausgabe-Bons; Standard über Migration/Seed */
+  outputGroup?: ProductOutputGroup
   stockTracking?: boolean
   stockQty?: number | null
   stockMin?: number | null
+}
+
+export type EventStatus = 'planned' | 'active' | 'completed' | 'archived'
+
+/** Lokale oder API-gespiegelte Veranstaltung (IndexedDB). */
+export interface EventRow {
+  id: string
+  name: string
+  startDate: string
+  endDate: string
+  startTime?: string | null
+  endTime?: string | null
+  location?: string | null
+  description?: string | null
+  status: EventStatus
+  createdAt: number
+  updatedAt: number
+  closedAt?: number | null
 }
 
 export interface SaleRow {
@@ -35,10 +80,14 @@ export interface SaleRow {
   totalCents: number
   paymentMethod: PaymentMethod
   receiptNo: number
+  /** Verknüpfung mit Veranstaltung (Server oder Offline-Kasse). */
+  eventId?: string | null
   /** Kassenbeleg (Kundenbon), ohne Nachdruck-Kopf */
   customerReceiptText?: string
-  /** Servierbon / Ausgabe, ohne Nachdruck-Kopf */
+  /** Alter gemeinsamer Servierbon (Migration); bei neuen Verkäufen leer */
   servingReceiptText?: string
+  /** Persistierte Stations-Ausgabe-Bons inkl. Druck-Zähler (JSON Array) */
+  outputReceiptsJson?: string
   customerReceiptPdfPath?: string
   servingReceiptPdfPath?: string
   printedCustomerReceipt?: boolean
@@ -57,22 +106,24 @@ export interface DualReceiptArchiveRow {
   createdAt: number
   paymentMethod: PaymentMethod
   totalCents: number
+  eventId?: string | null
   teamName?: string
   /** JSON `ReceiptLineModel[]` für Nachdruck-Layout */
   linesJson: string
   customerReceiptText: string
-  servingReceiptText: string
+  servingReceiptText?: string
+  outputReceiptsJson?: string
   printedCustomerReceipt: boolean
-  printedServingReceipt: boolean
+  printedServingReceipt?: boolean
   customerReceiptPrintCount: number
-  servingReceiptPrintCount: number
+  servingReceiptPrintCount?: number
 }
 
 export interface ReceiptReprintLogRow {
   id?: number
   /** lokale `sale.id` oder `remote:${serverSaleId}` bzw. Archiv-`id` */
   saleRef: string
-  kind: 'customer' | 'serving'
+  kind: ReceiptReprintKind
   at: number
   userLabel: string
 }
