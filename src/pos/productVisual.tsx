@@ -73,7 +73,7 @@ export function ProductVisual(props: {
 
   return (
     <div
-      className="relative h-full max-h-full min-h-0 w-[42%] max-w-[6.75rem] shrink-0 overflow-hidden rounded-l-xl border-r border-red-500/40"
+      className="relative aspect-square h-full max-h-full min-h-0 w-[40%] max-w-[5.5rem] shrink-0 overflow-hidden rounded-l-xl border-r border-red-500/40 sm:max-w-[6.5rem]"
       style={
         showImg ?
           { background: '#050505' }
@@ -84,12 +84,12 @@ export function ProductVisual(props: {
       }
     >
       {showImg && src ?
-        <div className="flex h-full w-full items-center justify-center p-1 sm:p-1.5">
+        <div className="absolute inset-0 flex items-center justify-center p-1.5">
           <img
             src={src}
             alt=""
             draggable={false}
-            className="max-h-full max-w-full object-contain object-center"
+            className="h-full w-full object-contain object-center"
             onError={() => setImgFailed(true)}
           />
         </div>

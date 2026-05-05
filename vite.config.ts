@@ -92,7 +92,6 @@ export default defineConfig({
           /^\/healthz$/,
           /^\/webhook(\/|$)/,
           /^\/DATA(\/|$)/,
-          /^\/manifest/,
           /^\/sw\.js$/,
           /^\/workbox-.+/,
         ],
