@@ -81,6 +81,8 @@ export default defineConfig({
         ],
       },
       workbox: {
+        /** Precache-Namespace erhoehen, damit alte Workbox-Caches nach Deploy verworfen werden. */
+        cacheId: `dlrg-kasse-sw-${pkg.version}`,
         globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2,webmanifest}'],
         // Cache nur App-Shell; API/Health/DATA nie aus SW-Cache bedienen.
         navigateFallback: '/index.html',
@@ -90,6 +92,10 @@ export default defineConfig({
           /^\/health$/,
           /^\/health\//,
           /^\/healthz$/,
+          /^\/v1(\/|$)/,
+          /^\/connect(\/|$)/,
+          /^\/oauth(\/|$)/,
+          /^\/callback(\/|$)/,
           /^\/webhook(\/|$)/,
           /^\/DATA(\/|$)/,
           /^\/sw\.js$/,
@@ -109,6 +115,14 @@ export default defineConfig({
                 p === '/health' ||
                 p.startsWith('/health/') ||
                 p === '/healthz' ||
+                p.startsWith('/v1/') ||
+                p === '/v1' ||
+                p === '/connect' ||
+                p.startsWith('/connect/') ||
+                p === '/oauth' ||
+                p.startsWith('/oauth/') ||
+                p === '/callback' ||
+                p.startsWith('/callback/') ||
                 p === '/webhook' ||
                 p.startsWith('/webhook/') ||
                 p === '/DATA' ||

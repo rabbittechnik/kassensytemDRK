@@ -10,6 +10,7 @@ import { logOut } from './api/auth'
 import { checkApiCatalogProbe, checkServerReachability } from './api/http'
 import { DemoBanner } from './demo/DemoBanner'
 import { OfflineIndicator } from './pwa/OfflineIndicator'
+import { PwaDebugOverlay } from './pwa/PwaDebugOverlay'
 import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
 
 const DB_INIT_TIMEOUT_MS = 10000
@@ -248,6 +249,7 @@ export default function App() {
 
   return (
     <PwaUpdateProvider>
+      <PwaDebugOverlay />
       {!ready ? (
         dbInitFailed ? (
           <div className="mx-auto flex h-full w-full max-w-2xl flex-col items-center justify-center gap-4 px-4 text-slate-200">

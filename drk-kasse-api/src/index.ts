@@ -1645,6 +1645,23 @@ async function bootstrap() {
     return payload
   })
 
+  /** Railway / Log-Explorer: 403 genau zuordnen (Pfad, Route, UA). */
+  app.addHook('onResponse', (request, reply, done) => {
+    if (reply.statusCode === 403) {
+      request.log.warn(
+        {
+          evt: 'HTTP_403',
+          method: request.method,
+          url: request.url,
+          routeConfigUrl: request.routeOptions?.url,
+          ua: request.headers['user-agent'] ?? null,
+        },
+        '403 Forbidden (SPA darf nur auf /api/* nach fehlendem Login JSON liefern, nicht auf /)',
+      )
+    }
+    done()
+  })
+
   registerRootHealthRoutes(app)
 
   if (env.apiMountPath) {

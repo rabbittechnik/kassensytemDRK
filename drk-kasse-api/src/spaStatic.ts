@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 import fastifyStatic from '@fastify/static'
-import type { FastifyInstance } from 'fastify'
+import type { FastifyInstance, FastifyReply } from 'fastify'
 
 /** SPA-Fallback nicht fuer API, Health, Webhooks, Bundles oder DATA-Mount */
 export function isSpaBypassPath(urlPath: string): boolean {
@@ -27,6 +27,34 @@ export async function registerSpaAssetsAndFallback(
   const indexPath = path.join(root, 'index.html')
   if (!fs.existsSync(indexPath))
     throw new Error(`SPA_ROOT: index.html fehlt unter ${root}`)
+
+  /**
+   * Explizite Shell fuer `/` und `/index.html` **vor** `@fastify/static`, damit `GET /`
+   * nie in Directory-/send()-Randfaelle laeuft (die u. U. 403 statt SPA liefern).
+   */
+  const sendSpaIndexHtml = (_req: unknown, reply: FastifyReply) => {
+    reply
+      .header('Cache-Control', 'no-cache, no-store, must-revalidate')
+      .header('Pragma', 'no-cache')
+      .type('text/html')
+      .send(fs.readFileSync(indexPath, 'utf8'))
+  }
+  app.get('/', sendSpaIndexHtml)
+  app.get('/index.html', sendSpaIndexHtml)
+  app.head('/', async (_req, reply) => {
+    return reply
+      .header('Cache-Control', 'no-cache, no-store, must-revalidate')
+      .type('text/html')
+      .code(200)
+      .send()
+  })
+  app.head('/index.html', async (_req, reply) => {
+    return reply
+      .header('Cache-Control', 'no-cache, no-store, must-revalidate')
+      .type('text/html')
+      .code(200)
+      .send()
+  })
 
   await app.register(fastifyStatic, {
     root,

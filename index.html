@@ -13,8 +13,56 @@
     <meta name="apple-mobile-web-app-title" content="DLRG Kasse" />
     <meta name="mobile-web-app-capable" content="yes" />
     <title>DLRG Kasse</title>
+    <script>
+      ;(function () {
+        try {
+          var dm = false
+          try {
+            dm = window.matchMedia('(display-mode: standalone)').matches
+          } catch (e) {}
+          console.log('[DLRG-Kasse HTML] document early', {
+            href: window.location.href,
+            referrer: document.referrer || '',
+            displayModeStandalone: dm,
+            navigatorStandalone: !!window.navigator.standalone,
+          })
+        } catch (e) {
+          console.warn('[DLRG-Kasse HTML] early log failed', e)
+        }
+      })()
+    </script>
   </head>
   <body>
+    <script>
+      ;(function () {
+        /* Wenn die Navigation schon eine JSON-Fehlerseite geliefert hat (kein Modul-Script): trotzdem nach / */
+        function tryRecover() {
+          try {
+            var dm = false
+            try {
+              dm = window.matchMedia('(display-mode: standalone)').matches
+            } catch (e) {}
+            var ns = !!window.navigator.standalone
+            if (!dm && !ns) return
+            var t = (document.body && document.body.innerText) ? document.body.innerText.trim() : ''
+            if (t.length === 0 || t.length > 2000) return
+            if (t.charAt(0) !== '{') return
+            if (t.indexOf('"statusCode"') === -1 && t.indexOf('"error"') === -1) return
+            console.warn('[DLRG-Kasse HTML] JSON-Fehlerdokument im Standalone, Redirect auf /', {
+              snippet: t.slice(0, 120),
+            })
+            window.location.replace(window.location.origin + '/')
+          } catch (e) {
+            console.warn('[DLRG-Kasse HTML] tryRecover', e)
+          }
+        }
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', tryRecover)
+        } else {
+          tryRecover()
+        }
+      })()
+    </script>
     <div id="root" class="h-full"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
