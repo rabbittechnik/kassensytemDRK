@@ -22,7 +22,7 @@ export interface CollectivePdfIssuer {
 }
 
 const RED: [number, number, number] = [200, 16, 46]
-const HEADER_SUB = [255, 248, 220]
+const HEADER_SUB: [number, number, number] = [255, 248, 220]
 const DEMO_BG: [number, number, number] = [254, 243, 199]
 const DEMO_TXT: [number, number, number] = [146, 64, 14]
 const TABLE_HEAD: [number, number, number] = [229, 229, 229]
