@@ -8,6 +8,7 @@ import type { FastifyInstance } from 'fastify'
 export function isSpaBypassPath(urlPath: string): boolean {
   const p = (urlPath.split('?')[0] ?? '/').replace(/\/+$/, '') || '/'
   if (p === '/health') return true
+  if (p === '/healthz') return true
   if (p === '/api' || p.startsWith('/api/')) return true
   if (p === '/webhook' || p.startsWith('/webhook/')) return true
   if (p === '/assets' || p.startsWith('/assets/')) return true

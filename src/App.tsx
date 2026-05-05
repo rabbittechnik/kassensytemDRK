@@ -12,6 +12,48 @@ import { DemoBanner } from './demo/DemoBanner'
 import { OfflineIndicator } from './pwa/OfflineIndicator'
 import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
 
+const DB_INIT_TIMEOUT_MS = 10000
+
+type InitPhase = 'idle' | 'seeding' | 'done' | 'failed' | 'timeout'
+type ServerModeState = 'off' | 'enabled'
+
+type InitDebug = {
+  phase: InitPhase
+  indexedDbAvailable: boolean
+  browser: string
+  appVersion: string
+  swActive: boolean
+  lastError: string | null
+}
+
+function detectBrowserLabel(): string {
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
+  const isIpad =
+    /iPad/i.test(ua) ||
+    (/Macintosh/i.test(ua) && typeof navigator !== 'undefined' && navigator.maxTouchPoints > 1)
+  const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS|Edg|OPR|FxiOS/i.test(ua)
+  if (isIpad && isSafari) return 'Safari/iPadOS'
+  if (isIpad) return 'iPadOS'
+  if (isSafari) return 'Safari'
+  return 'Unbekannt'
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const id = window.setTimeout(() => reject(new Error('DB_INIT_TIMEOUT')), ms)
+    promise.then(
+      (value) => {
+        window.clearTimeout(id)
+        resolve(value)
+      },
+      (error) => {
+        window.clearTimeout(id)
+        reject(error)
+      },
+    )
+  })
+}
+
 function PinOverlay(props: {
   onSuccess: () => void
   onCancel: () => void
@@ -76,6 +118,16 @@ function PinOverlay(props: {
 
 export default function App() {
   const [ready, setReady] = useState(false)
+  const [dbInitFailed, setDbInitFailed] = useState(false)
+  const [serverMode, setServerMode] = useState<ServerModeState>('off')
+  const [dbInitDebug, setDbInitDebug] = useState<InitDebug>({
+    phase: 'idle',
+    indexedDbAvailable: typeof indexedDB !== 'undefined',
+    browser: detectBrowserLabel(),
+    appVersion: String(import.meta.env.VITE_APP_VERSION ?? 'dev'),
+    swActive: false,
+    lastError: null,
+  })
   const [route, setRoute] = useState<'pos' | 'admin'>('pos')
   const [adminOk, setAdminOk] = useState(false)
   const [zOpen, setZOpen] = useState(false)
@@ -84,7 +136,35 @@ export default function App() {
   const [apiReachable, setApiReachable] = useState(false)
 
   useEffect(() => {
-    void ensureSeed().then(() => setReady(true))
+    let alive = true
+    const init = async () => {
+      const swActive =
+        typeof navigator !== 'undefined' &&
+        'serviceWorker' in navigator &&
+        (await navigator.serviceWorker.getRegistration()) != null
+      if (!alive) return
+      setDbInitDebug((prev) => ({ ...prev, swActive, phase: 'seeding' }))
+      try {
+        await withTimeout(ensureSeed(), DB_INIT_TIMEOUT_MS)
+        if (!alive) return
+        setDbInitDebug((prev) => ({ ...prev, phase: 'done', lastError: null }))
+        setReady(true)
+      } catch (e) {
+        if (!alive) return
+        const msg = String((e as Error)?.message ?? e)
+        const timeout = msg.includes('DB_INIT_TIMEOUT')
+        setDbInitDebug((prev) => ({
+          ...prev,
+          phase: timeout ? 'timeout' : 'failed',
+          lastError: msg,
+        }))
+        setDbInitFailed(true)
+      }
+    }
+    void init()
+    return () => {
+      alive = false
+    }
   }, [])
 
   useEffect(() => {
@@ -109,7 +189,7 @@ export default function App() {
   }, [ready])
 
   useEffect(() => {
-    if (!ready || !hasApi()) return
+    if (!hasApi()) return
     let alive = true
     const probe = async () => {
       const result = await checkServerReachability('/health')
@@ -136,13 +216,74 @@ export default function App() {
     await db.settings.put({ key: 'preferredDataMode', value: mode })
   }
 
+  const resetDatabaseAndReload = async () => {
+    try {
+      await db.delete()
+    } catch {
+      // ignored
+    }
+    window.location.reload()
+  }
+
   return (
     <PwaUpdateProvider>
       {!ready ? (
-        <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-300">
-          <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
-          <p>Datenbank wird vorbereitet …</p>
-        </div>
+        dbInitFailed ? (
+          <div className="mx-auto flex h-full w-full max-w-2xl flex-col items-center justify-center gap-4 px-4 text-slate-200">
+            <h2 className="text-lg font-semibold">Lokale Datenbank konnte nicht vorbereitet werden.</h2>
+            <p className="text-center text-sm text-slate-400">
+              Die App hat beim Start Probleme mit IndexedDB oder einer Migration erkannt.
+            </p>
+            <div className="grid w-full gap-2 rounded-xl border border-white/10 bg-black/30 p-3 text-xs">
+              <p>Schritt: {dbInitDebug.phase}</p>
+              <p>IndexedDB verfügbar: {dbInitDebug.indexedDbAvailable ? 'ja' : 'nein'}</p>
+              <p>Letzter Fehler: {dbInitDebug.lastError ?? 'kein Fehlertext'}</p>
+              <p>Browser: {dbInitDebug.browser}</p>
+              <p>Service Worker aktiv: {dbInitDebug.swActive ? 'ja' : 'nein'}</p>
+              <p>App-Version: {dbInitDebug.appVersion}</p>
+            </div>
+            <div className="flex flex-wrap justify-center gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold hover:bg-white/10"
+                onClick={() => void resetDatabaseAndReload()}
+              >
+                Datenbank zurücksetzen
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-white/20 px-3 py-2 text-sm font-semibold hover:bg-white/10"
+                onClick={() => window.location.reload()}
+              >
+                App neu laden
+              </button>
+              <button
+                type="button"
+                className="rounded-lg border border-cyan-400/60 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-900/30"
+                onClick={() => setServerMode('enabled')}
+              >
+                Servermodus verwenden
+              </button>
+            </div>
+            {serverMode === 'enabled' && (
+              <div className="w-full rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 text-sm text-cyan-100">
+                <p className="font-semibold">
+                  Servermodus aktiv{hasApi() ? '' : ' (API nicht konfiguriert)'}
+                </p>
+                <p className="mt-1 text-xs text-cyan-200/90">
+                  API erreichbar: {apiReachable ? 'ja' : 'nein'}.
+                  {!apiReachable ? ' Bitte Netzwerk/Server prüfen und dann App neu laden.' : ''}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-300">
+            <div className="h-10 w-10 animate-spin rounded-full border-2 border-cyan-400 border-t-transparent" />
+            <p>Datenbank wird vorbereitet …</p>
+            <p className="text-xs text-slate-500">Schritt: {dbInitDebug.phase}</p>
+          </div>
+        )
       ) : (
         <div className="flex h-full min-h-0 flex-col">
           <DemoBanner />

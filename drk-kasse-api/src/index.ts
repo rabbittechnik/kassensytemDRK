@@ -1623,6 +1623,24 @@ async function bootstrap() {
 
   })
 
+  // Health/API responses should never be served from intermediate caches.
+  app.addHook('onSend', async (req, reply, payload) => {
+    const urlPath = (req.url.split('?')[0] ?? '/').replace(/\/+$/, '') || '/'
+    const isHealth = urlPath === '/health'
+    const isApiPath =
+      urlPath === '/api' ||
+      urlPath.startsWith('/api/') ||
+      (Boolean(env.apiMountPath) &&
+        (urlPath === env.apiMountPath ||
+          urlPath.startsWith(`${env.apiMountPath}/`)))
+    if (isHealth || isApiPath) {
+      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate')
+      reply.header('Pragma', 'no-cache')
+      reply.header('Expires', '0')
+    }
+    return payload
+  })
+
   if (env.apiMountPath) {
     await app.register(mountPublicAndGuardedRoutes, { prefix: env.apiMountPath })
     app.get('/health', async () => ({ ok: true }))

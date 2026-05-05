@@ -77,8 +77,10 @@ export default defineConfig({
         // Cache nur App-Shell; API/Health/DATA nie aus SW-Cache bedienen.
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [
+          /^\/api$/,
           /^\/api\//,
           /^\/health$/,
+          /^\/health\//,
           /^\/webhook(\/|$)/,
           /^\/DATA(\/|$)/,
         ],
@@ -90,8 +92,10 @@ export default defineConfig({
               if (request.mode === 'navigate') return false
               const p = url.pathname
               return (
+                p === '/api' ||
                 p.startsWith('/api/') ||
                 p === '/health' ||
+                p.startsWith('/health/') ||
                 p === '/webhook' ||
                 p.startsWith('/webhook/') ||
                 p === '/DATA' ||
