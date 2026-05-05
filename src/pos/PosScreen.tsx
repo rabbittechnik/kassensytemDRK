@@ -35,7 +35,8 @@ import { ProductVisual } from './productVisual'
 import { CashTenderModal } from './CashTenderModal'
 import { InvoiceSaleModal } from './InvoiceSaleModal'
 import { API_BASE_URL, apiBaseUrl, hasApi } from '../api/config'
-import { apiJson, resolveApiUrl } from '../api/http'
+import { apiJson, checkServerReachability, resolveApiUrl } from '../api/http'
+import { buildMetaSummary } from '../lib/buildMeta'
 import {
   apiCreateManualDepositRedemption,
   apiCreateHelperConsumption,
@@ -439,7 +440,9 @@ export function PosScreen({
   const [toast, setToast] = useState<string | null>(null)
   const [printBusy, setPrintBusy] = useState(false)
   const [pwaCheckBusy, setPwaCheckBusy] = useState(false)
+  const [cacheRefreshBusy, setCacheRefreshBusy] = useState(false)
   const [pwaUpdateOfferOpen, setPwaUpdateOfferOpen] = useState(false)
+  const [lastApiError, setLastApiError] = useState<string | null>(null)
   const [demoPreviewOpen, setDemoPreviewOpen] = useState(false)
   const [demoPreviewReceipts, setDemoPreviewReceipts] = useState<DemoPreviewReceiptItem[]>([])
   const [demoPreviewSelectedId, setDemoPreviewSelectedId] = useState<string | null>(null)
@@ -631,6 +634,30 @@ export function PosScreen({
       setPwaCheckBusy(false)
     }
   }, [checkForUpdate])
+
+  const handleCacheRefresh = useCallback(async () => {
+    setCacheRefreshBusy(true)
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        for (const reg of regs) {
+          try {
+            await reg.update()
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+            }
+          } catch {
+            /* ignore individual registration errors */
+          }
+        }
+      }
+      showToast('Cache wird aktualisiert – App lädt neu …', 2000)
+      window.setTimeout(() => window.location.reload(), 2200)
+    } catch {
+      showToast('Cache-Aktualisierung fehlgeschlagen.', 4000)
+      setCacheRefreshBusy(false)
+    }
+  }, [])
 
   const handleDepositRedeem = useCallback(async () => {
     if (!demoMode) {
@@ -1720,8 +1747,20 @@ export function PosScreen({
               <div className="mt-1 normal-case text-[10px] text-slate-400">
                 Checks: API_BASE_URL {apiDiag.baseSet ? 'gesetzt' : 'leer'} · /health{' '}
                 {apiDiag.healthReachable ? 'ok' : 'fail'} · /api {apiDiag.apiReachable ? 'ok' : 'fail'} ·
-                Pfand-Endpunkt {apiDiag.depositEndpointReachable ? 'ok' : 'fail'} · Offline-Modus{' '}
-                {!apiJwt ? 'ja' : 'nein'} · Demo {demoMode ? 'ja' : 'nein'}
+                Pfand-Endpunkt {apiDiag.depositEndpointReachable ? 'ok' : 'fail'} · JWT{' '}
+                {apiJwt ? 'vorhanden' : 'fehlt'} · Demo {demoMode ? 'ja' : 'nein'}
+              </div>
+              <div className="mt-1 normal-case text-[10px] text-slate-400">
+                Health-URL: <span className="font-mono">{typeof window !== 'undefined' ? `${window.location.origin}${resolveApiUrl('/health')}` : resolveApiUrl('/health')}</span>
+                {' · '}preferredMode: <span className="font-mono">{dataMode}</span>
+                {' · '}activeMode: <span className="font-mono">{remoteMode ? 'api' : 'offline'}</span>
+                {lastApiError && (
+                  <span className="ml-1 text-rose-300"> · Letzter Fehler: {lastApiError}</span>
+                )}
+              </div>
+              <div className="mt-1 normal-case text-[10px] text-slate-400">
+                Version: <span className="font-mono">{buildMetaSummary().version}</span>
+                {' · '}Build: <span className="font-mono">{buildMetaSummary().buildFormatted}</span>
               </div>
             </div>
             {!demoMode && (
@@ -1729,18 +1768,30 @@ export function PosScreen({
                 {!remoteMode ? (
                   <button
                     type="button"
-                    disabled={!apiConnected || !apiJwt}
-                    onClick={() => onActivateOnlineMode?.()}
-                    className="rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/45 disabled:cursor-not-allowed disabled:opacity-35"
-                    title={
-                      apiConnected
-                        ? 'Auf Online-/Servermodus wechseln.'
-                        : 'Online-Modus nicht möglich – Server nicht erreichbar'
-                    }
+                    onClick={async () => {
+                      const result = await checkServerReachability('/health')
+                      if (!result.reachable && !result.requiresAuth) {
+                        setLastApiError('Server nicht erreichbar (HTTP ' + (result.status ?? 'Netzwerkfehler') + ')')
+                        showToast('Server nicht erreichbar. Netzwerk und Backend-URL prüfen.', 5000)
+                        return
+                      }
+                      if (!apiJwt) {
+                        // Server erreichbar, aber kein JWT → Anmeldung erforderlich
+                        showToast(
+                          result.requiresAuth
+                            ? 'Server erreichbar – Anmeldung erforderlich. Bitte einloggen.'
+                            : 'Server erreichbar – bitte zuerst anmelden.',
+                          5000,
+                        )
+                        return
+                      }
+                      setLastApiError(null)
+                      onActivateOnlineMode?.()
+                    }}
+                    className="rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/45"
+                    title="Auf Online-/Servermodus wechseln."
                   >
-                    {apiConnected && apiJwt
-                      ? 'Jetzt Online-Modus verwenden'
-                      : 'Online-Modus nicht möglich – Server nicht erreichbar'}
+                    {apiJwt ? 'Jetzt Online-Modus verwenden' : 'Online-Modus aktivieren'}
                   </button>
                 ) : (
                   <button
@@ -1801,6 +1852,16 @@ export function PosScreen({
               className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
               Einstellungen
+            </button>
+            <button
+              type="button"
+              disabled={cacheRefreshBusy}
+              onClick={() => void handleCacheRefresh()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/50 bg-sky-950/20 px-3 py-2 text-xs font-bold uppercase text-sky-200 hover:bg-sky-950/35 disabled:opacity-40"
+              title="Service Worker aktualisieren und App komplett neu laden (Cache leeren)"
+            >
+              <RefreshIcon className={cacheRefreshBusy ? 'animate-spin' : ''} />
+              {cacheRefreshBusy ? 'Lädt…' : 'Cache aktualisieren'}
             </button>
             <button
               type="button"

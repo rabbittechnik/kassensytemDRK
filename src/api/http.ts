@@ -44,6 +44,38 @@ export function describeApiReachability(path = '/health'): string {
   }
 }
 
+/**
+ * Prüft, ob der Server erreichbar ist, ohne 401/403 als "nicht erreichbar" zu werten.
+ *
+ * Rückgabe:
+ *  - `{ reachable: true,  requiresAuth: false }` → HTTP 200 (oder anderer 2xx/3xx)
+ *  - `{ reachable: true,  requiresAuth: true  }` → HTTP 401 oder 403
+ *  - `{ reachable: false, requiresAuth: false }` → Netzwerkfehler, Timeout, 5xx
+ */
+export async function checkServerReachability(path = '/health'): Promise<{
+  reachable: boolean
+  requiresAuth: boolean
+  status: number | null
+}> {
+  try {
+    const url = resolveApiUrl(path)
+    const res = await fetch(url, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: AbortSignal.timeout(8000),
+    })
+    if (res.status === 401 || res.status === 403) {
+      return { reachable: true, requiresAuth: true, status: res.status }
+    }
+    if (res.status >= 500) {
+      return { reachable: false, requiresAuth: false, status: res.status }
+    }
+    return { reachable: true, requiresAuth: false, status: res.status }
+  } catch {
+    return { reachable: false, requiresAuth: false, status: null }
+  }
+}
+
 export async function apiFetch(path: string, init: ApiFetchInit = {}): Promise<Response> {
   const token = getStoredToken()
   const headers = new Headers(init.headers)
