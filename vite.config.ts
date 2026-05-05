@@ -22,6 +22,14 @@ export default defineConfig({
         target: process.env.VITE_DEV_API_TARGET ?? 'http://127.0.0.1:8787',
         changeOrigin: true,
       },
+      '/health': {
+        target: process.env.VITE_DEV_API_TARGET ?? 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
+      '/healthz': {
+        target: process.env.VITE_DEV_API_TARGET ?? 'http://127.0.0.1:8787',
+        changeOrigin: true,
+      },
     },
   },
   plugins: [

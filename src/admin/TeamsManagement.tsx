@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { apiJson, ApiError, describeApiReachability } from '../api/http'
+import { apiJson, ApiError, describeBackendHealthUrl } from '../api/http'
 import { login } from '../api/auth'
 import { getStoredRole, getStoredToken } from '../api/config'
 import { formatDateTime } from '../lib/format'
@@ -127,7 +127,7 @@ export function TeamsManagement(props: { onTeamsChanged: () => void }) {
         setErr('Nicht angemeldet oder keine Berechtigung. Bitte erneut an der API anmelden (Benutzer admin).')
       else if (e instanceof ApiError && e.status === 0)
         setErr(
-          `Backend nicht erreichbar oder nicht angemeldet. Bitte API-Verbindung prüfen. (${describeApiReachability('/health')})`,
+          `Backend nicht erreichbar oder nicht angemeldet. Bitte API-Verbindung prüfen. (Health: ${describeBackendHealthUrl()})`,
         )
       else setErr(String((e as Error).message))
       setTeams([])
@@ -404,7 +404,7 @@ export function TeamsManagement(props: { onTeamsChanged: () => void }) {
             Seite; die API liegt unter dem Pfad{' '}
             <code className="text-cyan-200">/api</code> (keine separate VITE-URL nötig).
             Health-Check:{' '}
-            <code className="text-cyan-200">{describeApiReachability('/health')}</code>
+            <code className="text-cyan-200">{describeBackendHealthUrl()}</code>
           </p>
           <div className="mt-4 grid max-w-md gap-3 md:grid-cols-2">
             <label className="text-xs text-neutral-500 md:col-span-2">

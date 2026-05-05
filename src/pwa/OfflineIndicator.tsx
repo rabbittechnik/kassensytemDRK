@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { apiFetch } from '../api/http'
+import { backendHealthFetchUrl } from '../api/http'
 import { hasApi } from '../api/config'
 
 /**
- * Offline-Indikator als Fixed-Banner unten am Bildschirm.
+ * Offline-Indikator im normalen Dokumentfluss (unter der Kassen-UI), nicht fixed — verdeckt keine Fußleiste.
  * Quelle:
  *  - `navigator.onLine` und `online`/`offline`-Events fuer Geraete-Status
- *  - Heartbeat alle 20 s gegen `/health` (über apiFetch → z. B. `/api/health` auf Railway)
+ *  - Heartbeat alle 20 s gegen öffentliches `/health` (gleiche Origin, nicht `/api`)
  * Banner-Text: "Offline - Backend nicht erreichbar".
  *
  * Beeinflusst keine Kassendaten; reine Status-Visualisierung.
@@ -35,7 +35,11 @@ export function OfflineIndicator() {
 
     const ping = async () => {
       try {
-        const res = await apiFetch('/health', { method: 'GET', cache: 'no-store' })
+        const res = await fetch(backendHealthFetchUrl(), {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        })
         if (!cancelled) setBackendOk(res.ok)
       } catch {
         if (!cancelled) setBackendOk(false)
@@ -63,9 +67,9 @@ export function OfflineIndicator() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 bottom-3 z-[120] flex justify-center px-3"
+      className="flex shrink-0 justify-center px-3 py-2"
     >
-      <div className="pointer-events-auto rounded-full border-2 border-amber-500/70 bg-black/85 px-4 py-2 text-xs font-black uppercase tracking-wide text-amber-200 shadow-[0_0_24px_rgba(255,191,0,0.35)]">
+      <div className="w-full max-w-xl rounded-xl border-2 border-amber-500/70 bg-black/85 px-4 py-2.5 text-center text-xs font-black uppercase tracking-wide text-amber-200 shadow-[0_0_24px_rgba(255,191,0,0.35)]">
         ⚠ {text}
       </div>
     </div>

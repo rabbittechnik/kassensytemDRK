@@ -35,7 +35,14 @@ import { ProductVisual } from './productVisual'
 import { CashTenderModal } from './CashTenderModal'
 import { InvoiceSaleModal } from './InvoiceSaleModal'
 import { API_BASE_URL, apiBaseUrl, hasApi } from '../api/config'
-import { apiJson, resolveApiUrl, checkServerReachability, describeApiReachability } from '../api/http'
+import {
+  apiJson,
+  backendHealthFetchUrl,
+  checkServerReachability,
+  describeBackendHealthUrl,
+  describeApiReachability,
+  resolveApiUrl,
+} from '../api/http'
 import {
   apiCreateManualDepositRedemption,
   apiCreateHelperConsumption,
@@ -569,9 +576,21 @@ export function PosScreen({
       return diag
     }
     const checks = await Promise.allSettled([
-      fetch(resolveApiUrl('/health'), { method: 'GET' }),
-      fetch(base, { method: 'GET' }),
-      fetch(resolveApiUrl('/deposit-vouchers/DIAG-PING-000000'), { method: 'GET' }),
+      fetch(backendHealthFetchUrl(), {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+      fetch(resolveApiUrl('/catalog/categories'), {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
+      fetch(resolveApiUrl('/deposit-vouchers/DIAG-PING-000000'), {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'same-origin',
+      }),
     ])
     const okish = (r: PromiseSettledResult<Response>) =>
       r.status === 'fulfilled' && r.value.status > 0
@@ -666,7 +685,7 @@ export function PosScreen({
     setOnlineModeCheckBusy(true)
     setOnlineModeCheckResult(null)
     try {
-      const result = await checkServerReachability('/health')
+      const result = await checkServerReachability()
       setOnlineModeCheckResult(result)
       if (!result.reachable && !result.requiresAuth) {
         showToast('Server nicht erreichbar. Bitte Netzwerk und Backend prüfen.', 5000)
@@ -1377,7 +1396,7 @@ export function PosScreen({
   const revHeading = demoMode ? 'DEMO‑Tagesumsatz' : 'Tagesumsatz'
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-black font-bold text-white">
+    <div className="pos-screen-root flex h-full min-h-0 min-w-0 flex-col bg-black font-bold text-white">
       <div
         className={[
           'border-b px-3 py-2.5 text-center text-[13px] font-semibold leading-snug',
@@ -1462,7 +1481,7 @@ export function PosScreen({
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:gap-4 md:p-4 md:landscape:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
+      <div className="pos-main-grid grid min-h-0 min-w-0 flex-1 gap-3 p-3 md:gap-4 md:p-4">
         <section className="flex min-h-0 min-w-0 flex-col gap-3 max-lg:portrait:min-h-[42vh]">
           <nav className="flex flex-shrink-0 flex-wrap gap-2 md:gap-3" aria-label="Kategorien">
             {categories.map((c) => (
@@ -1477,8 +1496,8 @@ export function PosScreen({
             ))}
           </nav>
 
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-[#ff003c]/25 bg-neutral-950/80 p-3 shadow-[inset_0_0_40px_rgba(0,0,0,0.6)]">
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4">
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden rounded-xl border border-[#ff003c]/25 bg-neutral-950/80 p-3 shadow-[inset_0_0_40px_rgba(0,0,0,0.6)]">
+            <div className="pos-product-grid grid gap-2 sm:gap-3">
               {products.map((p) => {
                 const soldOut = Boolean(
                   p.stockTracking && Number(p.stockQty ?? 0) <= 0,
@@ -1525,7 +1544,7 @@ export function PosScreen({
 
         <aside
           className={[
-            'panel-dlrg flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden rounded-xl max-lg:portrait:max-h-[55vh]',
+            'pos-cart-aside panel-dlrg flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden rounded-xl max-lg:portrait:max-h-[55vh]',
             cartPulse ? 'animate-cart-pulse' : '',
           ].join(' ')}
         >
@@ -1655,12 +1674,12 @@ export function PosScreen({
         </aside>
       </div>
 
-      <footer className="flex-shrink-0 space-y-3 border-t border-[#ff003c]/30 bg-black px-3 pb-4 pt-3 md:px-5">
+      <footer className="pos-checkout-footer flex min-w-0 flex-shrink-0 space-y-3 border-t border-[#ff003c]/30 bg-black px-3 pb-4 pt-3 md:px-5">
         <div className="rounded-xl border border-[#ff003c]/40 bg-neutral-950/40 p-3">
           <p className="mb-2 text-xs font-black uppercase tracking-[0.12em] text-[#FFD700]">
             Abschlussart wählen
           </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="checkout-pos-grid grid gap-2">
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
@@ -1746,8 +1765,8 @@ export function PosScreen({
                     <span className="font-mono text-slate-200">{apiDiag.baseUrl || '/api'}</span>
                   </div>
                   <div>
-                    Health-URL:{' '}
-                    <span className="font-mono text-slate-200">{describeApiReachability('/health')}</span>
+                    Health (Origin):{' '}
+                    <span className="font-mono text-slate-200">{describeBackendHealthUrl()}</span>
                   </div>
                   <div>
                     /health:{' '}
@@ -1762,7 +1781,10 @@ export function PosScreen({
                     )}
                   </div>
                   <div>
-                    /api:{' '}
+                    Katalog:{' '}
+                    <span className="font-mono text-[9px] text-slate-500">
+                      {describeApiReachability('/catalog/categories')}
+                    </span>{' '}
                     <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>
                       {apiDiag.apiReachable ? 'ok' : 'fail'}
                     </span>
@@ -1812,8 +1834,9 @@ export function PosScreen({
 
           <div
             className={[
-              toolsOpen ? 'grid' : 'hidden lg:grid',
-              'grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6',
+              toolsOpen
+                ? 'flex flex-wrap gap-2 lg:grid lg:grid-cols-6 lg:gap-2'
+                : 'hidden lg:grid lg:grid-cols-6 lg:gap-2',
             ].join(' ')}
           >
             <button

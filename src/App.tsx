@@ -7,7 +7,7 @@ import { db } from './db/database'
 import { sha256Hex } from './lib/pin'
 import { getStoredToken, hasApi } from './api/config'
 import { logOut } from './api/auth'
-import { checkServerReachability } from './api/http'
+import { checkApiCatalogProbe, checkServerReachability } from './api/http'
 import { DemoBanner } from './demo/DemoBanner'
 import { OfflineIndicator } from './pwa/OfflineIndicator'
 import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
@@ -185,7 +185,7 @@ export default function App() {
       try {
         const standalone = window.matchMedia('(display-mode: standalone)').matches
         if (standalone && hasApi() && mode === 'api' && !getStoredToken()) {
-          const result = await checkServerReachability('/health')
+          const result = await checkServerReachability()
           if (!alive) return
           const ok = result.reachable || result.requiresAuth
           if (!ok) {
@@ -207,10 +207,12 @@ export default function App() {
     if (!hasApi()) return
     let alive = true
     const probe = async () => {
-      const result = await checkServerReachability('/health')
+      const [health, catalog] = await Promise.all([
+        checkServerReachability(),
+        checkApiCatalogProbe(),
+      ])
       if (!alive) return
-      // Treat "auth required" (401/403) as reachable — server is up, just needs login
-      setApiReachable(result.reachable || result.requiresAuth)
+      setApiReachable(health.reachable && catalog.reachable)
     }
     void probe()
     const t = window.setInterval(() => void probe(), 15000)
@@ -297,9 +299,9 @@ export default function App() {
           </div>
         )
       ) : (
-        <div className="flex h-full min-h-0 flex-col">
+        <div className="pos-app-column flex h-full min-h-0 min-w-0 flex-col">
           <DemoBanner />
-          <div className="min-h-0 flex-1">
+          <div className="min-h-0 flex-1 min-w-0 overflow-hidden">
             {preferredDataMode === 'api' && !apiReachable && (
               <div className="border-b border-amber-500/40 bg-amber-950/30 px-3 py-2 text-xs font-semibold text-amber-100">
                 Server nicht erreichbar. Es wird Offline/Lokal verwendet.

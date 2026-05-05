@@ -8,7 +8,12 @@ import { exportSalesCsv } from '../export/exportSales'
 import { exportDemoSalesCsv } from '../export/exportDemo'
 import type { CategoryRow, DepositType, ProductOutputGroup, ProductRow } from '../types'
 import { API_BASE_URL, apiBaseUrl, hasApi, getStoredToken } from '../api/config'
-import { resolveApiUrl, checkServerReachability, describeApiReachability } from '../api/http'
+import {
+  backendHealthFetchUrl,
+  checkServerReachability,
+  describeBackendHealthUrl,
+  resolveApiUrl,
+} from '../api/http'
 
 const OUTPUT_GROUP_OPTIONS: { value: ProductOutputGroup; label: string }[] = [
   { value: 'getraenke', label: 'Getränke' },
@@ -873,16 +878,28 @@ function DiagnosePanel(props: { onApiLogout?: () => void }) {
     setCheckBusy(true)
     try {
       const checks = await Promise.allSettled([
-        fetch(resolveApiUrl('/health'), { method: 'GET' }),
-        fetch(base, { method: 'GET' }),
-        fetch(resolveApiUrl('/deposit-vouchers/DIAG-PING-000000'), { method: 'GET' }),
+        fetch(backendHealthFetchUrl(), {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        }),
+        fetch(resolveApiUrl('/catalog/categories'), {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        }),
+        fetch(resolveApiUrl('/deposit-vouchers/DIAG-PING-000000'), {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        }),
       ])
       const okish = (r: PromiseSettledResult<Response>) =>
         r.status === 'fulfilled' && r.value.status > 0
       diag.healthReachable = okish(checks[0])
       diag.apiReachable = okish(checks[1])
       diag.depositEndpointReachable = okish(checks[2])
-      const healthResult = await checkServerReachability('/health')
+      const healthResult = await checkServerReachability()
       setLastCheckResult(healthResult)
     } finally {
       setApiDiag(diag)
@@ -923,7 +940,7 @@ function DiagnosePanel(props: { onApiLogout?: () => void }) {
           <span className="font-mono text-slate-200 break-all">{apiDiag.baseUrl || '/api'}</span>
 
           <span className="text-slate-400">Health-URL</span>
-          <span className="font-mono text-slate-200 break-all text-xs">{describeApiReachability('/health')}</span>
+          <span className="font-mono text-slate-200 break-all text-xs">{describeBackendHealthUrl()}</span>
 
           <span className="text-slate-400">Login-Status (JWT)</span>
           <span className={`font-semibold ${apiJwt ? 'text-emerald-300' : 'text-rose-300'}`}>
@@ -951,7 +968,7 @@ function DiagnosePanel(props: { onApiLogout?: () => void }) {
             )}
           </span>
 
-          <span className="text-slate-400">/api</span>
+          <span className="text-slate-400">/catalog/categories</span>
           <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>
             {apiDiag.apiReachable ? 'ok' : 'fail'}
           </span>

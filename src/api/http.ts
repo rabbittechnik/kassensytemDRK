@@ -32,7 +32,7 @@ export function resolveApiUrl(path: string): string {
   return `${b}${rel}`
 }
 
-export function describeApiReachability(path = '/health'): string {
+export function describeApiReachability(path: string): string {
   try {
     const u = resolveApiUrl(path)
     if (typeof window !== 'undefined' && window.location?.origin && u.startsWith('/')) {
@@ -45,28 +45,74 @@ export function describeApiReachability(path = '/health'): string {
 }
 
 /**
- * Prüft, ob der Server erreichbar ist, und unterscheidet zwischen
- * "nicht erreichbar" und "Authentifizierung erforderlich".
- *
- * - HTTP 200        → reachable: true,  requiresAuth: false
- * - HTTP 401 / 403  → reachable: true,  requiresAuth: true
- * - Netzwerkfehler / 5xx → reachable: false, requiresAuth: false
+ * Liveness liegt im Monolith **immer unter `/health`** auf der gleichen Origin
+ * (`https://example.com/health`), nie unter `/api/health`.
  */
-export async function checkServerReachability(path = '/health'): Promise<{
+export function backendHealthFetchUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/health`
+  }
+  return '/health'
+}
+
+export function describeBackendHealthUrl(): string {
+  try {
+    return backendHealthFetchUrl()
+  } catch {
+    return '/health'
+  }
+}
+
+export async function checkApiCatalogProbe(): Promise<{
+  reachable: boolean
+  status: number | null
+}> {
+  /** Öffentlicher Lese-Endpunkt: ohne JWT liefert das Backend typischerweise 401 AUTH. */
+  try {
+    const res = await fetch(resolveApiUrl('/catalog/categories'), {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+    const okProbe =
+      res.status === 200 ||
+      res.status === 401 ||
+      res.status === 403 ||
+      (res.status >= 400 && res.status < 500)
+    const unreachable = res.status >= 500
+    return {
+      reachable: okProbe && !unreachable && res.status > 0,
+      status: res.status,
+    }
+  } catch {
+    return { reachable: false, status: null }
+  }
+}
+
+/**
+ * Prüft, ob das Backend unter **öffentlichem `/health`** lebt (gleiche Origin).
+ * Kein Routing über `VITE_API_BASE_URL`; `/health` ist niemals authentifiziert.
+ *
+ * Netzwerkfehler / HTTP ≥500 / andere Fehlercodes → reachable: false.
+ */
+export async function checkServerReachability(_pathUnused?: string): Promise<{
   reachable: boolean
   requiresAuth: boolean
   status: number | null
 }> {
   try {
-    const url = resolveApiUrl(path)
-    const res = await fetch(url, { method: 'GET', cache: 'no-store' })
-    if (res.status === 401 || res.status === 403) {
-      return { reachable: true, requiresAuth: true, status: res.status }
-    }
+    const res = await fetch(backendHealthFetchUrl(), {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
     if (res.status >= 500) {
       return { reachable: false, requiresAuth: false, status: res.status }
     }
-    return { reachable: res.status > 0, requiresAuth: false, status: res.status }
+    if (!res.ok) {
+      return { reachable: false, requiresAuth: false, status: res.status }
+    }
+    return { reachable: true, requiresAuth: false, status: res.status }
   } catch {
     return { reachable: false, requiresAuth: false, status: null }
   }
