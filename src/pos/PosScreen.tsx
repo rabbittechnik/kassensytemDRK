@@ -109,7 +109,7 @@ function withHelperOutputHeader(text: string): string {
 
 function tabCls(active: boolean) {
   return [
-    'min-h-[52px] min-w-[140px] rounded-lg px-6 py-3 text-base font-bold uppercase tracking-wide transition-all',
+    'min-h-[44px] sm:min-h-[48px] min-w-[120px] rounded-lg px-4 py-2.5 text-base font-bold uppercase tracking-wide whitespace-nowrap transition-all sm:px-6 sm:py-3',
     active
       ? 'border-2 border-[#ff003c] bg-red-950/50 text-white shadow-[0_0_28px_rgba(255,0,60,0.45)]'
       : 'border-2 border-[#FFD700]/80 bg-black text-[#FFD700] hover:bg-neutral-950 hover:shadow-[0_0_16px_rgba(255,215,0,0.2)]',
@@ -450,6 +450,7 @@ export function PosScreen({
     status: number | null
   } | null>(null)
   const [diagPanelOpen, setDiagPanelOpen] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [pwaUpdateOfferOpen, setPwaUpdateOfferOpen] = useState(false)
   const [demoPreviewOpen, setDemoPreviewOpen] = useState(false)
   const [demoPreviewReceipts, setDemoPreviewReceipts] = useState<DemoPreviewReceiptItem[]>([])
@@ -591,6 +592,14 @@ export function PosScreen({
       window.removeEventListener('online', onOnline)
     }
   }, [runApiDiagnostics])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 1024px)')
+    const sync = () => setToolsOpen(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
 
   const apiConnected = apiDiag.healthReachable && apiDiag.apiReachable
   const modeLabel = demoMode ? 'Demo' : remoteMode ? 'Online / Server' : 'Offline / Lokal'
@@ -1404,36 +1413,36 @@ export function PosScreen({
           </>
         )}
       </div>
-      <header className="flex flex-shrink-0 flex-wrap items-start justify-between gap-4 border-b border-[#ff003c]/40 px-4 py-3 md:px-6">
-        <div className="min-w-0">
+      <header className="flex flex-shrink-0 flex-wrap items-start justify-between gap-3 border-b border-[#ff003c]/40 px-3 py-2.5 md:gap-4 md:px-5 md:py-3">
+        <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-baseline gap-2">
-            <span className="text-4xl font-black tracking-tight text-[#FFD700] md:text-5xl">
+            <span className="text-3xl font-black tracking-tight text-[#FFD700] md:text-4xl lg:text-5xl">
               DLRG
             </span>
-            <span className="text-3xl font-black tracking-wide text-white md:text-4xl">
+            <span className="text-2xl font-black tracking-wide text-white md:text-3xl lg:text-4xl">
               KASSE
             </span>
           </div>
-          <p className="mt-2 max-w-2xl text-sm font-semibold leading-snug text-[#ff003c] md:text-base">
+          <p className="mt-1 max-w-2xl text-xs font-semibold leading-snug text-[#ff003c] md:mt-2 md:text-sm lg:text-base">
             Für ECHT. Wenn keiner damit rechnet, sind WIR da.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-stretch justify-end gap-2 md:gap-3">
-          <div className="panel-widget flex min-w-[140px] items-center gap-2 rounded-lg px-3 py-2 md:min-w-[160px]">
+        <div className="flex min-w-0 flex-1 flex-wrap items-stretch justify-end gap-2 sm:flex-none sm:basis-auto md:gap-3">
+          <div className="panel-widget flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 sm:min-w-0 sm:flex-none sm:basis-auto">
             <span className="text-2xl" aria-hidden>
               🪙
             </span>
-            <div>
+            <div className="min-w-0">
               <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-400">
                 {revHeading}
               </div>
-              <div className="text-lg tabular-nums text-[#FFD700] md:text-xl">
+              <div className="text-base tabular-nums text-[#FFD700] md:text-lg lg:text-xl">
                 {revLabel}
               </div>
             </div>
           </div>
-          <div className="panel-widget flex min-w-[130px] items-center gap-2 rounded-lg px-3 py-2">
+          <div className="panel-widget flex min-h-[44px] min-w-0 flex-1 items-center gap-2 rounded-lg px-3 py-2 sm:flex-none sm:basis-auto">
             <span className="text-2xl" aria-hidden>
               📅
             </span>
@@ -1453,8 +1462,8 @@ export function PosScreen({
         </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 lg:grid-cols-[1fr_min(420px,40vw)] lg:gap-4 lg:p-4">
-        <section className="flex min-h-0 flex-col gap-3">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 md:gap-4 md:p-4 md:landscape:grid-cols-[minmax(0,1fr)_minmax(320px,420px)] lg:grid-cols-[minmax(0,1fr)_minmax(360px,440px)]">
+        <section className="flex min-h-0 min-w-0 flex-col gap-3 max-lg:portrait:min-h-[42vh]">
           <nav className="flex flex-shrink-0 flex-wrap gap-2 md:gap-3" aria-label="Kategorien">
             {categories.map((c) => (
               <button
@@ -1469,7 +1478,7 @@ export function PosScreen({
           </nav>
 
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl border border-[#ff003c]/25 bg-neutral-950/80 p-3 shadow-[inset_0_0_40px_rgba(0,0,0,0.6)]">
-            <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-3 md:grid-cols-3 xl:grid-cols-4">
               {products.map((p) => {
                 const soldOut = Boolean(
                   p.stockTracking && Number(p.stockQty ?? 0) <= 0,
@@ -1481,7 +1490,7 @@ export function PosScreen({
                     disabled={soldOut || !saleAvailability.canSell}
                     onClick={() => addProduct(p.id, p.name, p.priceCents)}
                     className={[
-                      'flex h-[5.85rem] w-full shrink-0 items-stretch overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98] sm:h-[6.35rem]',
+                      'flex min-h-[5.85rem] w-full min-w-0 shrink-0 items-stretch overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98] sm:min-h-[6.35rem]',
                       'shadow-[0_0_22px_rgba(255,0,60,0.35)] hover:shadow-[0_0_32px_rgba(255,0,60,0.5)]',
                       soldOut || !saleAvailability.canSell ? 'opacity-50 grayscale' : '',
                       tapId === p.id ? 'animate-tap' : '',
@@ -1516,7 +1525,7 @@ export function PosScreen({
 
         <aside
           className={[
-            'panel-dlrg flex min-h-0 flex-col overflow-hidden rounded-xl',
+            'panel-dlrg flex min-h-0 min-w-0 max-w-full flex-col overflow-hidden rounded-xl max-lg:portrait:max-h-[55vh]',
             cartPulse ? 'animate-cart-pulse' : '',
           ].join(' ')}
         >
@@ -1528,7 +1537,7 @@ export function PosScreen({
                 disabled={cart.length === 0}
                 title="Letzte Änderung rückgängig (Ctrl+Z)"
                 onClick={undoLast}
-                className="rounded px-2 py-1 text-lg text-[#FFD700] hover:bg-neutral-950 disabled:opacity-20"
+                className="flex min-h-11 min-w-11 items-center justify-center rounded text-lg text-[#FFD700] hover:bg-neutral-950 disabled:opacity-20"
               >
                 ⟲
               </button>
@@ -1536,7 +1545,7 @@ export function PosScreen({
                 type="button"
                 disabled={cart.length === 0}
                 onClick={() => setCart([])}
-                className="text-2xl text-[#ff003c] opacity-80 hover:opacity-100 disabled:opacity-20"
+                className="flex min-h-11 min-w-11 items-center justify-center text-2xl text-[#ff003c] opacity-80 hover:opacity-100 disabled:opacity-20"
                 title="Warenkorb leeren"
               >
                 🗑
@@ -1575,15 +1584,15 @@ export function PosScreen({
                           <div className="flex items-center gap-0.5">
                             <button
                               type="button"
-                              className="h-8 w-8 rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
+                              className="flex min-h-11 min-w-11 items-center justify-center rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
                               onClick={() => setQty(l.productId, l.qty - 1)}
                             >
                               −
                             </button>
-                            <span className="w-7 text-center text-[#FFD700]">{l.qty}</span>
+                            <span className="min-w-8 text-center text-[#FFD700]">{l.qty}</span>
                             <button
                               type="button"
-                              className="h-8 w-8 rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
+                              className="flex min-h-11 min-w-11 items-center justify-center rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
                               onClick={() => setQty(l.productId, l.qty + 1)}
                             >
                               +
@@ -1657,7 +1666,7 @@ export function PosScreen({
             disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
             onClick={() => openCashModal('withBon')}
             title="Kunde bezahlt bar."
-            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-emerald-400/70 bg-emerald-900/30 px-4 py-2 text-lg font-black uppercase text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.28)] transition enabled:hover:bg-emerald-900/45 disabled:opacity-35"
+            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-emerald-400/70 bg-emerald-900/30 px-3 py-2 text-base font-black uppercase text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.28)] transition enabled:hover:bg-emerald-900/45 disabled:opacity-35 lg:text-lg"
           >
             Barzahlung
             <span className="text-xs font-bold text-emerald-200">F12 / Enter</span>
@@ -1667,7 +1676,7 @@ export function PosScreen({
             disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => setCardOpen(true)}
             title="Kunde bezahlt per Karte."
-            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-cyan-400/70 bg-cyan-950/25 px-4 py-2 text-lg font-black uppercase text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,.22)] transition enabled:hover:bg-cyan-950/40 disabled:opacity-35"
+            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-cyan-400/70 bg-cyan-950/25 px-3 py-2 text-base font-black uppercase text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,.22)] transition enabled:hover:bg-cyan-950/40 disabled:opacity-35 lg:text-lg"
           >
             Kartenzahlung
             <span className="text-xs font-bold text-cyan-200">F11</span>
@@ -1677,7 +1686,7 @@ export function PosScreen({
             disabled={!saleAvailability.canSell || cart.length === 0 || (!remoteMode && !demoMode)}
             onClick={() => setInvoiceOpen(true)}
             title={!remoteMode && !demoMode ? 'Auf Team/Verein buchen. (Erfordert API + Login)' : 'Auf Team/Verein buchen.'}
-            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-cyan-950/20 px-4 py-2 text-lg font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-cyan-950/35 disabled:opacity-35"
+            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-cyan-500/70 bg-cyan-950/20 px-3 py-2 text-base font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-cyan-950/35 disabled:opacity-35 lg:text-lg"
           >
             Auf Rechnung
           </button>
@@ -1686,7 +1695,7 @@ export function PosScreen({
             disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => void handleHelperConsumption()}
             title="Kostenlose Helferausgabe dokumentieren."
-            className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-orange-400/70 bg-orange-900/25 px-4 py-2 text-lg font-black uppercase text-orange-100 shadow-[0_0_22px_rgba(251,146,60,.24)] transition enabled:hover:bg-orange-900/40 disabled:opacity-35"
+            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-orange-400/70 bg-orange-900/25 px-3 py-2 text-base font-black uppercase text-orange-100 shadow-[0_0_22px_rgba(251,146,60,.24)] transition enabled:hover:bg-orange-900/40 disabled:opacity-35 lg:text-lg"
           >
             Helferverpflegung
             <span className="text-xs font-bold text-orange-200">0,00 EUR - dokumentieren</span>
@@ -1702,7 +1711,7 @@ export function PosScreen({
             type="button"
             onClick={() => void handleDepositRedeem()}
             title="Pfandbon prüfen und Pfand zurückzahlen."
-            className="flex min-h-[62px] flex-col items-center justify-center rounded-lg border border-sky-500/60 bg-sky-950/25 px-3 py-2 text-sm font-bold uppercase text-sky-100 hover:bg-sky-950/40 disabled:opacity-35"
+            className="flex min-h-[44px] flex-col items-center justify-center whitespace-nowrap rounded-lg border border-sky-500/60 bg-sky-950/25 px-3 py-2 text-sm font-bold uppercase text-sky-100 hover:bg-sky-950/40 disabled:opacity-35 sm:min-h-[52px]"
           >
             Pfand auszahlen
             <span className="text-[11px] font-semibold text-sky-200">Flasche/Bon zurück</span>
@@ -1710,31 +1719,126 @@ export function PosScreen({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2">
-          <div className="flex flex-wrap gap-2">
+        <div className="space-y-2 border-t border-white/10 pt-2">
+          <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+            <button
+              type="button"
+              className="rounded border border-white/15 bg-black/30 px-2 py-1 normal-case text-slate-300 hover:border-[#FFD700]/40"
+              onClick={() => setDiagPanelOpen((v) => !v)}
+              title="API-Diagnose"
+            >
+              Diagnose {diagPanelOpen ? '▴' : '▾'}
+            </button>
+            <span className="hidden min-w-0 truncate sm:inline normal-case">
+              {modeLabel} · API {apiConnected ? 'verbunden' : 'aus'}
+            </span>
+            <span className="hidden font-mono normal-case text-slate-500 md:inline">
+              {apiDiag.baseUrl || '/api'}
+            </span>
+          </div>
+          {diagPanelOpen &&
+            (() => {
+              const { version, buildFormatted } = buildMetaSummary()
+              return (
+                <div className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[10px] normal-case text-slate-400">
+                  <div>
+                    API_BASE_URL:{' '}
+                    <span className="font-mono text-slate-200">{apiDiag.baseUrl || '/api'}</span>
+                  </div>
+                  <div>
+                    Health-URL:{' '}
+                    <span className="font-mono text-slate-200">{describeApiReachability('/health')}</span>
+                  </div>
+                  <div>
+                    /health:{' '}
+                    <span className={apiDiag.healthReachable ? 'text-emerald-300' : 'text-rose-300'}>
+                      {apiDiag.healthReachable ? 'ok' : 'fail'}
+                    </span>
+                    {onlineModeCheckResult && (
+                      <span className="ml-1 text-slate-500">
+                        (HTTP {onlineModeCheckResult.status ?? 'Netzwerkfehler'}
+                        {onlineModeCheckResult.requiresAuth ? ' – Auth erforderlich' : ''})
+                      </span>
+                    )}
+                  </div>
+                  <div>
+                    /api:{' '}
+                    <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>
+                      {apiDiag.apiReachable ? 'ok' : 'fail'}
+                    </span>
+                  </div>
+                  <div>
+                    Pfand-Endpunkt:{' '}
+                    <span
+                      className={
+                        apiDiag.depositEndpointReachable ? 'text-emerald-300' : 'text-rose-300'
+                      }
+                    >
+                      {apiDiag.depositEndpointReachable ? 'ok' : 'fail'}
+                    </span>
+                  </div>
+                  <div>
+                    JWT:{' '}
+                    <span className={apiJwt ? 'text-emerald-300' : 'text-rose-300'}>
+                      {apiJwt ? 'vorhanden' : 'nicht gesetzt'}
+                    </span>
+                  </div>
+                  <div>
+                    Modus (remote / aktiv):{' '}
+                    <span className="text-slate-200">
+                      {remoteMode ? 'api' : 'offline'} / {dataMode}
+                    </span>
+                  </div>
+                  <div>
+                    Demo: <span className="text-slate-200">{demoMode ? 'ja' : 'nein'}</span>
+                  </div>
+                  <div>
+                    Version: <span className="text-slate-200">{version}</span> · Build:{' '}
+                    <span className="text-slate-200">{buildFormatted}</span>
+                  </div>
+                </div>
+              )
+            })()}
+
+          <div className="flex items-center justify-between gap-2 lg:hidden">
+            <button
+              type="button"
+              className="min-h-[44px] flex-1 rounded-lg border border-[#ff003c]/40 bg-neutral-950 px-3 py-2 text-xs font-black uppercase text-[#FFD700]"
+              onClick={() => setToolsOpen((v) => !v)}
+            >
+              Werkzeuge {toolsOpen ? '▴' : '▾'}
+            </button>
+          </div>
+
+          <div
+            className={[
+              toolsOpen ? 'grid' : 'hidden lg:grid',
+              'grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6',
+            ].join(' ')}
+          >
             <button
               type="button"
               disabled={cart.length === 0 || printBusy}
               onClick={() => void handlePrintDraft()}
               title="Bon-Entwurf drucken."
-              className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50 disabled:opacity-35"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-600 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50 disabled:opacity-35"
             >
-              Bon Entwurf
+              Bon
             </button>
             <button
               type="button"
               disabled={cart.length === 0}
               onClick={clearWholeCart}
               title="Warenkorb komplett leeren."
-              className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-[#ff003c] hover:border-[#ff003c]/60 disabled:opacity-35"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-600 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-[#ff003c] hover:border-[#ff003c]/60 disabled:opacity-35"
             >
-              Warenkorb leeren
+              Leeren
             </button>
             <button
               type="button"
               disabled={cart.length === 0}
               onClick={undoLast}
-              className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-[#FFD700] hover:border-[#FFD700]/50 disabled:opacity-35"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-600 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-[#FFD700] hover:border-[#FFD700]/50 disabled:opacity-35"
               title="Ctrl+Z"
             >
               Undo
@@ -1743,110 +1847,60 @@ export function PosScreen({
               type="button"
               onClick={() => onOpenAdmin()}
               title="Artikel und Stammdaten verwalten."
-              className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-600 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
-              Artikel verwalten
+              Artikel
             </button>
             <button
               type="button"
               onClick={() => onOpenZReport()}
               title="Tagesbericht und Abschlüsse anzeigen."
-              className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-600 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
               Tagesbericht
             </button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
+            {!demoMode && !remoteMode ? (
               <button
                 type="button"
-                className="mb-1 font-black text-slate-300 hover:text-white"
-                onClick={() => setDiagPanelOpen((v) => !v)}
-                title="API-Diagnose ein-/ausblenden"
+                disabled={onlineModeCheckBusy || !apiReachable}
+                onClick={() => void handleActivateOnlineMode()}
+                className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-2 py-2 text-[11px] font-bold uppercase text-emerald-100 hover:bg-emerald-950/45 disabled:cursor-not-allowed disabled:opacity-35"
+                title={
+                  !apiReachable
+                    ? 'Server nicht erreichbar'
+                    : !apiJwt
+                      ? 'Server erreichbar – Anmeldung erforderlich'
+                      : 'Online-Modus aktivieren'
+                }
               >
-                Betriebsmodus:{' '}
-                <span className="font-black text-white">{modeLabel}</span>
-                {' · '}API-Status:{' '}
-                <span className={`font-black ${apiConnected ? 'text-emerald-300' : 'text-rose-300'}`}>
-                  {apiConnected ? 'verbunden' : 'nicht verbunden'}
-                </span>
-                {' · '}Backend-URL:{' '}
-                <span className="font-mono normal-case text-slate-200">{apiDiag.baseUrl || '/api'}</span>
-                {' '}▾
+                {onlineModeCheckBusy
+                  ? 'Prüfe …'
+                  : !apiReachable
+                    ? 'Offline'
+                    : !apiJwt
+                      ? 'Anmelden'
+                      : 'Online'}
               </button>
-              {diagPanelOpen && (() => {
-                const { version, buildFormatted } = buildMetaSummary()
-                return (
-                  <div className="mt-1 space-y-0.5 normal-case text-[10px] text-slate-400">
-                    <div>API_BASE_URL: <span className="font-mono text-slate-200">{apiDiag.baseUrl || '/api'}</span></div>
-                    <div>Health-URL: <span className="font-mono text-slate-200">{describeApiReachability('/health')}</span></div>
-                    <div>
-                      /health:{' '}
-                      <span className={apiDiag.healthReachable ? 'text-emerald-300' : 'text-rose-300'}>
-                        {apiDiag.healthReachable ? 'ok' : 'fail'}
-                      </span>
-                      {onlineModeCheckResult && (
-                        <span className="ml-1 text-slate-400">
-                          (letzter Check: HTTP {onlineModeCheckResult.status ?? 'Netzwerkfehler'}
-                          {onlineModeCheckResult.requiresAuth ? ' – Auth erforderlich' : ''})
-                        </span>
-                      )}
-                    </div>
-                    <div>/api: <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>{apiDiag.apiReachable ? 'ok' : 'fail'}</span></div>
-                    <div>Pfand-Endpunkt: <span className={apiDiag.depositEndpointReachable ? 'text-emerald-300' : 'text-rose-300'}>{apiDiag.depositEndpointReachable ? 'ok' : 'fail'}</span></div>
-                    <div>JWT: <span className={apiJwt ? 'text-emerald-300' : 'text-rose-300'}>{apiJwt ? 'vorhanden' : 'nicht gesetzt'}</span></div>
-                    <div>Modus (bevorzugt / aktiv): <span className="text-slate-200">{remoteMode ? 'api' : 'offline'} / {dataMode}</span></div>
-                    <div>Demo: <span className="text-slate-200">{demoMode ? 'ja' : 'nein'}</span></div>
-                    <div>Version: <span className="text-slate-200">{version}</span> · Build: <span className="text-slate-200">{buildFormatted}</span></div>
-                  </div>
-                )
-              })()}
-            </div>
-            {!demoMode && (
-              <>
-                {!remoteMode ? (
-                  <button
-                    type="button"
-                    disabled={onlineModeCheckBusy || !apiReachable}
-                    onClick={() => void handleActivateOnlineMode()}
-                    className="rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/45 disabled:cursor-not-allowed disabled:opacity-35"
-                    title={
-                      !apiReachable
-                        ? 'Server nicht erreichbar'
-                        : !apiJwt
-                          ? 'Server erreichbar – Anmeldung erforderlich'
-                          : 'Online-Modus aktivieren'
-                    }
-                  >
-                    {onlineModeCheckBusy
-                      ? 'Prüfe Server …'
-                      : !apiReachable
-                        ? 'Server nicht erreichbar'
-                        : !apiJwt
-                          ? 'Jetzt anmelden / Online-Modus aktivieren'
-                          : 'Jetzt Online-Modus verwenden'}
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => onActivateOfflineMode?.()}
-                    className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-3 py-2 text-xs font-bold uppercase text-amber-100 hover:bg-amber-950/40"
-                    title="Auf Offline-/Lokalmodus wechseln."
-                  >
-                    Auf Offline-Modus wechseln
-                  </button>
-                )}
-              </>
-            )}
+            ) : null}
+            {!demoMode && remoteMode ? (
+              <button
+                type="button"
+                onClick={() => onActivateOfflineMode?.()}
+                className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-amber-500/45 bg-amber-950/25 px-2 py-2 text-[11px] font-bold uppercase text-amber-100 hover:bg-amber-950/40"
+                title="Auf Offline-/Lokalmodus wechseln."
+              >
+                Offline
+              </button>
+            ) : null}
             {demoMode ? (
               <>
                 <button
                   type="button"
                   disabled={printBusy}
                   onClick={() => void handleTestPrint()}
-                  className="rounded-lg border border-yellow-400/60 bg-yellow-950/30 px-3 py-2 text-xs font-bold uppercase text-yellow-200 hover:bg-yellow-950/50 disabled:opacity-40"
+                  className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-yellow-400/60 bg-yellow-950/30 px-2 py-2 text-[11px] font-bold uppercase text-yellow-200 hover:bg-yellow-950/50 disabled:opacity-40"
                 >
-                  Testbon drucken
+                  Testbon
                 </button>
                 <button
                   type="button"
@@ -1854,45 +1908,45 @@ export function PosScreen({
                     void logDemoModeAudit('leave')
                     exitDemoMode()
                   }}
-                  className="rounded-lg border-2 border-amber-400/70 bg-amber-500/15 px-3 py-2 text-xs font-black uppercase text-amber-100 hover:bg-amber-500/25"
+                  className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border-2 border-amber-400/70 bg-amber-500/15 px-2 py-2 text-[11px] font-black uppercase text-amber-100 hover:bg-amber-500/25"
                 >
-                  Demo-Modus verlassen
+                  Demo aus
                 </button>
               </>
             ) : (
               <button
                 type="button"
                 onClick={() => setDemoCodeOpen(true)}
-                className="rounded-lg border border-yellow-500/50 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-yellow-200 hover:bg-yellow-950/40"
+                className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-yellow-500/50 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-yellow-200 hover:bg-yellow-950/40"
                 title="Demo-Modus für Vorführungen"
               >
-                Demo-Modus
+                Demo
               </button>
             )}
             <button
               type="button"
               disabled={pwaCheckBusy}
               onClick={() => void handlePwaUpdateCheck()}
-              className="inline-flex items-center gap-1.5 rounded-lg border-2 border-[#ff003c]/55 border-t-[#FFD700]/55 bg-neutral-950 px-3 py-2 text-xs font-bold uppercase text-[#FFD700] shadow-[0_0_14px_rgba(255,0,60,0.15)] hover:bg-black disabled:opacity-40"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1 whitespace-nowrap rounded-lg border-2 border-[#ff003c]/55 border-t-[#FFD700]/55 bg-neutral-950 px-2 py-2 text-[11px] font-bold uppercase text-[#FFD700] shadow-[0_0_14px_rgba(255,0,60,0.15)] hover:bg-black disabled:opacity-40"
               title="Neue App-Version vom Server laden (ohne Kassendaten zu löschen)"
             >
               <RefreshIcon className={pwaCheckBusy ? 'animate-spin' : ''} />
-              {pwaCheckBusy ? 'Prüfe…' : 'Update prüfen'}
+              Update
             </button>
             <button
               type="button"
               disabled={cacheRefreshBusy}
               onClick={() => void handleCacheRefresh()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/50 bg-sky-950/20 px-3 py-2 text-xs font-bold uppercase text-sky-200 hover:bg-sky-950/35 disabled:opacity-40"
+              className="inline-flex min-h-[44px] items-center justify-center gap-1 whitespace-nowrap rounded-lg border border-sky-500/50 bg-sky-950/20 px-2 py-2 text-[11px] font-bold uppercase text-sky-200 hover:bg-sky-950/35 disabled:opacity-40"
               title="Service-Worker-Cache leeren und Seite neu laden"
             >
               <RefreshIcon className={cacheRefreshBusy ? 'animate-spin' : ''} />
-              {cacheRefreshBusy ? 'Aktualisiere…' : 'Cache aktualisieren'}
+              Cache
             </button>
             <button
               type="button"
               onClick={() => onOpenAdmin()}
-              className="rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-600 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-neutral-300 hover:border-[#FFD700]/50"
             >
               Einstellungen
             </button>
@@ -1901,7 +1955,7 @@ export function PosScreen({
               onClick={() => {
                 if (window.confirm('Kassenterminal neu laden?')) window.location.reload()
               }}
-              className="rounded-lg border border-[#ff003c]/40 bg-neutral-900 px-3 py-2 text-xs font-bold uppercase text-[#ff003c] hover:bg-red-950/30"
+              className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-[#ff003c]/40 bg-neutral-900 px-2 py-2 text-[11px] font-bold uppercase text-[#ff003c] hover:bg-red-950/30"
             >
               Neu laden
             </button>

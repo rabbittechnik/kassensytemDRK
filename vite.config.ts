@@ -28,8 +28,8 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      /** Nutzer bestätigt Update (`useRegisterSW` / Workbox `waiting`). */
-      registerType: 'prompt',
+      /** Nach Deploy schnell aktivieren; alte Precaches werden bereinigt. */
+      registerType: 'autoUpdate',
       includeAssets: [
         'favicon.svg',
         'icons/icon.svg',
@@ -81,11 +81,16 @@ export default defineConfig({
           /^\/api\//,
           /^\/health$/,
           /^\/health\//,
+          /^\/healthz$/,
           /^\/webhook(\/|$)/,
           /^\/DATA(\/|$)/,
+          /^\/manifest/,
+          /^\/sw\.js$/,
+          /^\/workbox-.+/,
         ],
+        cleanupOutdatedCaches: true,
         clientsClaim: true,
-        skipWaiting: false,
+        skipWaiting: true,
         runtimeCaching: [
           {
             urlPattern: ({ url, request }) => {
@@ -96,10 +101,15 @@ export default defineConfig({
                 p.startsWith('/api/') ||
                 p === '/health' ||
                 p.startsWith('/health/') ||
+                p === '/healthz' ||
                 p === '/webhook' ||
                 p.startsWith('/webhook/') ||
                 p === '/DATA' ||
-                p.startsWith('/DATA/')
+                p.startsWith('/DATA/') ||
+                p === '/manifest.webmanifest' ||
+                p.startsWith('/manifest') ||
+                p === '/sw.js' ||
+                p.startsWith('/workbox-')
               )
             },
             handler: 'NetworkOnly',

@@ -15,7 +15,6 @@ import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
 const DB_INIT_TIMEOUT_MS = 10000
 
 type InitPhase = 'idle' | 'seeding' | 'done' | 'failed' | 'timeout'
-type ServerModeState = 'off' | 'enabled'
 
 type InitDebug = {
   phase: InitPhase
@@ -119,7 +118,6 @@ function PinOverlay(props: {
 export default function App() {
   const [ready, setReady] = useState(false)
   const [dbInitFailed, setDbInitFailed] = useState(false)
-  const [serverMode, setServerMode] = useState<ServerModeState>('off')
   const [dbInitDebug, setDbInitDebug] = useState<InitDebug>({
     phase: 'idle',
     indexedDbAvailable: typeof indexedDB !== 'undefined',
@@ -178,10 +176,27 @@ export default function App() {
     let alive = true
     void (async () => {
       const row = await db.settings.get('preferredDataMode')
-      const mode = row?.value === 'api' ? 'api' : 'offline'
+      let mode: 'api' | 'offline' = row?.value === 'api' ? 'api' : 'offline'
       if (!alive) return
       setPreferredDataMode(mode)
       if (!row) await db.settings.put({ key: 'preferredDataMode', value: mode })
+
+      // PWA (Standalone): wenn API nicht erreichbar und kein Token, nicht im „API warten“-Zustand hängen bleiben
+      try {
+        const standalone = window.matchMedia('(display-mode: standalone)').matches
+        if (standalone && hasApi() && mode === 'api' && !getStoredToken()) {
+          const result = await checkServerReachability('/health')
+          if (!alive) return
+          const ok = result.reachable || result.requiresAuth
+          if (!ok) {
+            mode = 'offline'
+            setPreferredDataMode('offline')
+            await db.settings.put({ key: 'preferredDataMode', value: 'offline' })
+          }
+        }
+      } catch {
+        /* ignore */
+      }
     })()
     return () => {
       alive = false
@@ -213,7 +228,11 @@ export default function App() {
 
   const switchPreferredMode = async (mode: 'api' | 'offline') => {
     setPreferredDataMode(mode)
-    await db.settings.put({ key: 'preferredDataMode', value: mode })
+    try {
+      await db.settings.put({ key: 'preferredDataMode', value: mode })
+    } catch {
+      /* IndexedDB nicht verfügbar — nur UI-Zustand */
+    }
   }
 
   const resetDatabaseAndReload = async () => {
@@ -260,22 +279,15 @@ export default function App() {
               <button
                 type="button"
                 className="rounded-lg border border-cyan-400/60 px-3 py-2 text-sm font-semibold text-cyan-200 hover:bg-cyan-900/30"
-                onClick={() => setServerMode('enabled')}
+                onClick={() => void switchPreferredMode('api')}
               >
                 Servermodus verwenden
               </button>
             </div>
-            {serverMode === 'enabled' && (
-              <div className="w-full rounded-xl border border-cyan-500/30 bg-cyan-950/20 p-3 text-sm text-cyan-100">
-                <p className="font-semibold">
-                  Servermodus aktiv{hasApi() ? '' : ' (API nicht konfiguriert)'}
-                </p>
-                <p className="mt-1 text-xs text-cyan-200/90">
-                  API erreichbar: {apiReachable ? 'ja' : 'nein'}.
-                  {!apiReachable ? ' Bitte Netzwerk/Server prüfen und dann App neu laden.' : ''}
-                </p>
-              </div>
-            )}
+            <p className="max-w-md text-center text-xs text-slate-500">
+              Bevorzugter Modus wird auf API gesetzt; Anmeldung unter Admin. API erreichbar:{' '}
+              {apiReachable ? 'ja' : 'nein'}.
+            </p>
           </div>
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-300">

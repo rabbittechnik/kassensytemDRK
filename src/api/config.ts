@@ -22,7 +22,14 @@ export function hasApi(): boolean {
 
 export function getStoredToken(): string | null {
   try {
-    return sessionStorage.getItem(STORAGE_KEY)
+    const fromLocal = localStorage.getItem(STORAGE_KEY)
+    if (fromLocal) return fromLocal
+    const fromSession = sessionStorage.getItem(STORAGE_KEY)
+    if (fromSession) {
+      localStorage.setItem(STORAGE_KEY, fromSession)
+      sessionStorage.removeItem(STORAGE_KEY)
+    }
+    return fromSession
   } catch {
     return null
   }
@@ -30,8 +37,13 @@ export function getStoredToken(): string | null {
 
 export function setStoredToken(t: string | null) {
   try {
-    if (t == null || t === '') sessionStorage.removeItem(STORAGE_KEY)
-    else sessionStorage.setItem(STORAGE_KEY, t)
+    if (t == null || t === '') {
+      localStorage.removeItem(STORAGE_KEY)
+      sessionStorage.removeItem(STORAGE_KEY)
+    } else {
+      localStorage.setItem(STORAGE_KEY, t)
+      sessionStorage.setItem(STORAGE_KEY, t)
+    }
   } catch {
     /* kiosk may block storage */
   }
@@ -39,8 +51,13 @@ export function setStoredToken(t: string | null) {
 
 export function setStoredRole(r: string | null) {
   try {
-    if (r == null || r === '') sessionStorage.removeItem(STORAGE_ROLE_KEY)
-    else sessionStorage.setItem(STORAGE_ROLE_KEY, r)
+    if (r == null || r === '') {
+      localStorage.removeItem(STORAGE_ROLE_KEY)
+      sessionStorage.removeItem(STORAGE_ROLE_KEY)
+    } else {
+      localStorage.setItem(STORAGE_ROLE_KEY, r)
+      sessionStorage.setItem(STORAGE_ROLE_KEY, r)
+    }
   } catch {
     /* ignore */
   }
@@ -48,7 +65,14 @@ export function setStoredRole(r: string | null) {
 
 export function getStoredRole(): string | null {
   try {
-    return sessionStorage.getItem(STORAGE_ROLE_KEY)
+    const fromLocal = localStorage.getItem(STORAGE_ROLE_KEY)
+    if (fromLocal) return fromLocal
+    const fromSession = sessionStorage.getItem(STORAGE_ROLE_KEY)
+    if (fromSession) {
+      localStorage.setItem(STORAGE_ROLE_KEY, fromSession)
+      sessionStorage.removeItem(STORAGE_ROLE_KEY)
+    }
+    return fromSession
   } catch {
     return null
   }

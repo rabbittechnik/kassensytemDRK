@@ -13,6 +13,9 @@ export function isSpaBypassPath(urlPath: string): boolean {
   if (p === '/webhook' || p.startsWith('/webhook/')) return true
   if (p === '/assets' || p.startsWith('/assets/')) return true
   if (p === '/DATA' || p.startsWith('/DATA/')) return true
+  if (p === '/manifest.webmanifest' || p.startsWith('/manifest')) return true
+  if (p === '/sw.js') return true
+  if (p.startsWith('/workbox-')) return true
   return false
 }
 

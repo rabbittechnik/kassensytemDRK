@@ -1530,8 +1530,6 @@ async function guardedRoutes(app: FastifyInstance) {
 }
 
 async function mountPublicAndGuardedRoutes(instance: FastifyInstance) {
-  instance.get('/health', async () => ({ ok: true }))
-
   instance.post('/auth/login', async (req, reply) => {
     const body = z.object({ username: z.string(), pin: z.string() }).parse(req.body ?? {})
 
@@ -1558,6 +1556,12 @@ async function mountPublicAndGuardedRoutes(instance: FastifyInstance) {
   })
 
   await instance.register(guardedRoutes)
+}
+
+/** Root health checks only (never under API prefix). */
+function registerRootHealthRoutes(app: FastifyInstance) {
+  app.get('/health', async (_req, reply) => reply.type('application/json').send({ ok: true }))
+  app.get('/healthz', async (_req, reply) => reply.type('application/json').send({ ok: true }))
 }
 
 async function bootstrap() {
@@ -1626,7 +1630,7 @@ async function bootstrap() {
   // Health/API responses should never be served from intermediate caches.
   app.addHook('onSend', async (req, reply, payload) => {
     const urlPath = (req.url.split('?')[0] ?? '/').replace(/\/+$/, '') || '/'
-    const isHealth = urlPath === '/health'
+    const isHealth = urlPath === '/health' || urlPath === '/healthz'
     const isApiPath =
       urlPath === '/api' ||
       urlPath.startsWith('/api/') ||
@@ -1641,9 +1645,10 @@ async function bootstrap() {
     return payload
   })
 
+  registerRootHealthRoutes(app)
+
   if (env.apiMountPath) {
     await app.register(mountPublicAndGuardedRoutes, { prefix: env.apiMountPath })
-    app.get('/health', async () => ({ ok: true }))
     console.log(`API routes prefixed: ${env.apiMountPath}`)
   } else {
     await app.register(mountPublicAndGuardedRoutes)
