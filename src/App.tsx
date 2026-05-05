@@ -7,6 +7,7 @@ import { db } from './db/database'
 import { sha256Hex } from './lib/pin'
 import { getStoredToken, hasApi } from './api/config'
 import { logOut } from './api/auth'
+import { resolveApiUrl } from './api/http'
 import { DemoBanner } from './demo/DemoBanner'
 import { OfflineIndicator } from './pwa/OfflineIndicator'
 import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
@@ -79,6 +80,8 @@ export default function App() {
   const [adminOk, setAdminOk] = useState(false)
   const [zOpen, setZOpen] = useState(false)
   const [apiJwt, setApiJwt] = useState<string | null>(() => getStoredToken())
+  const [preferredDataMode, setPreferredDataMode] = useState<'api' | 'offline'>('offline')
+  const [apiReachable, setApiReachable] = useState(false)
 
   useEffect(() => {
     void ensureSeed().then(() => setReady(true))
@@ -89,6 +92,53 @@ export default function App() {
     window.addEventListener('drk-kasse-auth', sync)
     return () => window.removeEventListener('drk-kasse-auth', sync)
   }, [])
+
+  useEffect(() => {
+    if (!ready) return
+    let alive = true
+    void (async () => {
+      const row = await db.settings.get('preferredDataMode')
+      const mode = row?.value === 'api' ? 'api' : 'offline'
+      if (!alive) return
+      setPreferredDataMode(mode)
+      if (!row) await db.settings.put({ key: 'preferredDataMode', value: mode })
+    })()
+    return () => {
+      alive = false
+    }
+  }, [ready])
+
+  useEffect(() => {
+    if (!ready || !hasApi()) return
+    let alive = true
+    const probe = async () => {
+      try {
+        const res = await fetch(resolveApiUrl('/health'), { method: 'GET' })
+        if (!alive) return
+        setApiReachable(res.status > 0)
+      } catch {
+        if (!alive) return
+        setApiReachable(false)
+      }
+    }
+    void probe()
+    const t = window.setInterval(() => void probe(), 15000)
+    const onOnline = () => void probe()
+    window.addEventListener('online', onOnline)
+    return () => {
+      alive = false
+      window.clearInterval(t)
+      window.removeEventListener('online', onOnline)
+    }
+  }, [ready])
+
+  const effectiveDataMode: 'api' | 'offline' =
+    hasApi() && apiJwt && preferredDataMode === 'api' && apiReachable ? 'api' : 'offline'
+
+  const switchPreferredMode = async (mode: 'api' | 'offline') => {
+    setPreferredDataMode(mode)
+    await db.settings.put({ key: 'preferredDataMode', value: mode })
+  }
 
   return (
     <PwaUpdateProvider>
@@ -101,9 +151,24 @@ export default function App() {
         <div className="flex h-full min-h-0 flex-col">
           <DemoBanner />
           <div className="min-h-0 flex-1">
+            {preferredDataMode === 'api' && effectiveDataMode === 'offline' && (
+              <div className="border-b border-amber-500/40 bg-amber-950/30 px-3 py-2 text-xs font-semibold text-amber-100">
+                Online-Modus gewünscht, aber Server aktuell nicht erreichbar. Es wird Offline/Lokal verwendet.
+                <button
+                  type="button"
+                  className="ml-2 rounded border border-amber-500/50 px-2 py-0.5 text-[11px] font-black hover:bg-amber-900/40"
+                  onClick={() => void switchPreferredMode('offline')}
+                >
+                  Offline-Modus verwenden
+                </button>
+              </div>
+            )}
             {route === 'pos' && (
               <PosScreen
                 apiJwt={hasApi() ? apiJwt : null}
+                dataMode={effectiveDataMode}
+                onActivateOnlineMode={() => void switchPreferredMode('api')}
+                onActivateOfflineMode={() => void switchPreferredMode('offline')}
                 onApiLogout={
                   hasApi()
                     ? () => {

@@ -143,6 +143,7 @@ async function ensureBonSettings(): Promise<void> {
     ['deposit_print_redemption_receipt', '0'],
     ['deposit_show_on_output_bons', '0'],
     ['helpers_deposit_enabled', '0'],
+    ['preferredDataMode', 'offline'],
     [
       'receiptTagline',
       'Fuer ECHT. Wenn keiner damit rechnet, sind WIR da.',

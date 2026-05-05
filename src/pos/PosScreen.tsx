@@ -158,6 +158,9 @@ export type PosScreenProps = {
   onOpenAdmin: () => void
   onOpenZReport: () => void
   apiJwt?: string | null
+  dataMode?: 'api' | 'offline'
+  onActivateOnlineMode?: () => void
+  onActivateOfflineMode?: () => void
   onApiLogout?: () => void
 }
 
@@ -165,10 +168,13 @@ export function PosScreen({
   onOpenAdmin,
   onOpenZReport,
   apiJwt,
+  dataMode = 'offline',
+  onActivateOnlineMode,
+  onActivateOfflineMode,
   onApiLogout,
 }: PosScreenProps) {
   const { checkForUpdate, applyUpdate } = usePwaUpdate()
-  const remoteMode = Boolean(hasApi() && apiJwt)
+  const remoteMode = Boolean(hasApi() && apiJwt && dataMode === 'api')
 
   const dexCategories = useLiveQuery(
     () => db.categories.orderBy('sortOrder').toArray(),
@@ -574,6 +580,9 @@ export function PosScreen({
       window.removeEventListener('online', onOnline)
     }
   }, [runApiDiagnostics])
+
+  const apiConnected = apiDiag.healthReachable && apiDiag.apiReachable
+  const modeLabel = demoMode ? 'Demo' : remoteMode ? 'Online / Server' : 'Offline / Lokal'
 
   useEffect(() => {
     let alive = true
@@ -1703,13 +1712,9 @@ export function PosScreen({
           <div className="flex flex-wrap gap-2">
             <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
               Betriebsmodus:{' '}
-              <span className="font-black text-white">
-                {demoMode ? 'Demo' : apiJwt && apiDiag.healthReachable && apiDiag.apiReachable ? 'API/Server' : 'Offline'}
-              </span>
+              <span className="font-black text-white">{modeLabel}</span>
               {' · '}API-Status:{' '}
-              <span className="font-black text-white">
-                {apiDiag.healthReachable && apiDiag.apiReachable ? 'verbunden' : 'nicht verbunden'}
-              </span>
+              <span className="font-black text-white">{apiConnected ? 'verbunden' : 'nicht verbunden'}</span>
               {' · '}Backend-URL:{' '}
               <span className="font-mono normal-case text-slate-200">{apiDiag.baseUrl || '/api'}</span>
               <div className="mt-1 normal-case text-[10px] text-slate-400">
@@ -1719,6 +1724,36 @@ export function PosScreen({
                 {!apiJwt ? 'ja' : 'nein'} · Demo {demoMode ? 'ja' : 'nein'}
               </div>
             </div>
+            {!demoMode && (
+              <>
+                {!remoteMode ? (
+                  <button
+                    type="button"
+                    disabled={!apiConnected || !apiJwt}
+                    onClick={() => onActivateOnlineMode?.()}
+                    className="rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/45 disabled:cursor-not-allowed disabled:opacity-35"
+                    title={
+                      apiConnected
+                        ? 'Auf Online-/Servermodus wechseln.'
+                        : 'Online-Modus nicht möglich – Server nicht erreichbar'
+                    }
+                  >
+                    {apiConnected && apiJwt
+                      ? 'Jetzt Online-Modus verwenden'
+                      : 'Online-Modus nicht möglich – Server nicht erreichbar'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onActivateOfflineMode?.()}
+                    className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-3 py-2 text-xs font-bold uppercase text-amber-100 hover:bg-amber-950/40"
+                    title="Auf Offline-/Lokalmodus wechseln."
+                  >
+                    Auf Offline-Modus wechseln
+                  </button>
+                )}
+              </>
+            )}
             {demoMode ? (
               <>
                 <button
