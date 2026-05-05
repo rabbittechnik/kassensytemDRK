@@ -223,16 +223,21 @@ body {
   }
 }
 
-/* Footer: weniger Höhe blockieren als früher (45vh) */
+/**
+ * Footer: Tablet darf schrumpfen (nicht flex-shrink-0), sonst frisst Safari/iPad oft ~50 %
+ * Viewport-Höhe trotz kleiner Buttons — Hauptgrid bleibt zugunsten Produkt/Warenkorb kleiner.
+ */
 .pos-checkout-footer {
   flex-direction: column;
+  flex-shrink: 1;
   overflow-y: auto;
-  max-height: min(34vh, 320px);
+  max-height: min(32vh, 300px);
 }
 
 @media (max-width: 1180px) {
   .pos-checkout-footer {
-    max-height: min(30vh, 280px);
+    flex-shrink: 1;
+    max-height: min(22vh, 210px);
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
   }
@@ -240,6 +245,7 @@ body {
 
 @media (min-width: 1181px) {
   .pos-checkout-footer {
+    flex-shrink: 0;
     max-height: none;
     overflow-y: visible;
   }

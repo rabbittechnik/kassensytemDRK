@@ -1674,7 +1674,7 @@ export function PosScreen({
         </aside>
       </div>
 
-      <footer className="pos-checkout-footer flex min-w-0 flex-shrink-0 flex-col gap-2 border-t border-[#ff003c]/30 bg-black px-3 pb-3 pt-2 md:px-5 lg:gap-3 lg:pb-4 lg:pt-3">
+      <footer className="pos-checkout-footer flex min-h-0 min-w-0 flex-col gap-2 border-t border-[#ff003c]/30 bg-black px-3 pb-3 pt-2 md:px-5 lg:gap-3 lg:pb-4 lg:pt-3">
         <div className="checkout-section rounded-xl border border-[#ff003c]/40 bg-neutral-950/40 p-3">
           <p className="checkout-section-heading mb-2 text-xs font-black uppercase tracking-[0.12em] text-[#FFD700]">
             Abschlussart wählen
