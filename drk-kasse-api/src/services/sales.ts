@@ -113,7 +113,7 @@ export async function createSale(params: {
   let totalGuess = lines.reduce((s, l) => s + l.unitPriceCents * l.qty, 0)
   /** Resolve prices from backend products if qty given without prices */
   const prodStmt = db.prepare(
-    `SELECT category_id, name, price_cents, vat_rate_percent, stock_tracking, stock_qty, deposit_enabled, deposit_amount
+    `SELECT category_id, name, price_cents, vat_rate_percent, stock_tracking, stock_qty, deposit_enabled, deposit_amount, deposit_name, deposit_type
      FROM products WHERE id = ?`,
   )
 
@@ -133,7 +133,9 @@ export async function createSale(params: {
       typeof l.unitPriceCents === 'number' && l.unitPriceCents >= 0
         ? l.unitPriceCents
         : (pr?.price_cents ?? 0)
-    totalGuess += unit * l.qty
+    const depositEnabled = Number((pr as { deposit_enabled?: number } | undefined)?.deposit_enabled ?? 0) === 1
+    const depositAmount = Number((pr as { deposit_amount?: number } | undefined)?.deposit_amount ?? 0)
+    totalGuess += unit * l.qty + (depositEnabled || depositAmount > 0 ? Math.max(0, depositAmount) * l.qty : 0)
   }
 
   if (payment.method === 'cash') {
@@ -203,8 +205,8 @@ export async function createSale(params: {
     const lineIns = db.prepare(
       `INSERT INTO sale_lines (
         id, sale_id, category_id, product_id, name, qty, unit_price_cents, line_total_cents, vat_rate_percent,
-        deposit_amount_cents, deposit_qty, deposit_total_cents
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+        deposit_amount_cents, deposit_name_snapshot, deposit_qty, deposit_total_cents
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     const voucherIns = db.prepare(
       `INSERT INTO deposit_vouchers (
@@ -223,6 +225,8 @@ export async function createSale(params: {
             stock_qty: number | null
             deposit_enabled: number
             deposit_amount: number
+            deposit_name: string | null
+            deposit_type: string | null
           }
         | undefined
       const name = (l.name && l.name.trim()) || pr?.name || 'Artikel'
@@ -234,9 +238,11 @@ export async function createSale(params: {
       const vat = pr?.vat_rate_percent ?? 19
       const lineTotal = unitPriceCents * l.qty
       const depositAmountCents =
-        Number(pr?.deposit_enabled ?? 0) === 1 ? Number(pr?.deposit_amount ?? 0) : 0
+        Number(pr?.deposit_enabled ?? 0) === 1 || Number(pr?.deposit_amount ?? 0) > 0 ? Number(pr?.deposit_amount ?? 0) : 0
+      const depositNameSnapshot =
+        depositAmountCents > 0 ? (pr?.deposit_name?.trim() || 'Pfand') : null
       const lineDepositTotal = depositAmountCents * l.qty
-      sum += lineTotal
+      sum += lineTotal + lineDepositTotal
       depositTotalCents += lineDepositTotal
       depositQtyTotal += depositAmountCents > 0 ? l.qty : 0
 
@@ -246,6 +252,14 @@ export async function createSale(params: {
         unitPriceCents,
         lineTotalCents: lineTotal,
       })
+      if (lineDepositTotal > 0) {
+        pdfLines.push({
+          name: `Pfand ${depositNameSnapshot ?? ''}`.trim(),
+          qty: l.qty,
+          unitPriceCents: depositAmountCents,
+          lineTotalCents: lineDepositTotal,
+        })
+      }
 
       lineIns.run(
         crypto.randomUUID(),
@@ -258,6 +272,7 @@ export async function createSale(params: {
         lineTotal,
         vat,
         depositAmountCents,
+        depositNameSnapshot,
         depositAmountCents > 0 ? l.qty : 0,
         lineDepositTotal,
       )
@@ -485,17 +500,21 @@ export function redeemDepositVoucher(params: {
 
     params.db
       .prepare(
-        `INSERT INTO deposit_redemptions (id, voucher_id, amount_cents, quantity, cashier, redeemed_at, note)
-         VALUES (?,?,?,?,?,?,?)`,
+        `INSERT INTO deposit_redemptions (
+          id, voucher_id, event_id, amount_cents, quantity, total_cents, cashier, redeemed_at, note, mode
+        ) VALUES (?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         crypto.randomUUID(),
         row.id,
+        null,
         row.amount_cents,
         row.quantity,
+        row.amount_cents,
         params.user.username ?? params.user.sub,
         now,
         params.note ?? null,
+        'voucher',
       )
   })
   tx()
@@ -513,6 +532,72 @@ export function redeemDepositVoucher(params: {
     amountCents: row.amount_cents,
     quantity: row.quantity,
     redeemedAt: now,
+  }
+}
+
+export function createManualDepositRedemption(params: {
+  db: BetterSqlite3.Database
+  dataRoot: string
+  user: JwtUser
+  eventId?: string | null
+  quantity: number
+  amountCents: number
+  depositName?: string
+  depositType?: string | null
+  note?: string
+}) {
+  const quantity = Math.floor(params.quantity)
+  const amountCents = Math.floor(params.amountCents)
+  if (!Number.isFinite(quantity) || quantity <= 0) throw new Error('INVALID_QUANTITY')
+  if (!Number.isFinite(amountCents) || amountCents <= 0) throw new Error('INVALID_AMOUNT')
+  const totalCents = quantity * amountCents
+  const now = Date.now()
+  const id = crypto.randomUUID()
+
+  params.db
+    .prepare(
+      `INSERT INTO deposit_redemptions (
+        id, voucher_id, event_id, amount_cents, deposit_name, deposit_type, quantity, total_cents, cashier, redeemed_at, note, mode
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .run(
+      id,
+      null,
+      params.eventId?.trim() || null,
+      amountCents,
+      params.depositName?.trim() || 'Pfand',
+      params.depositType ?? null,
+      quantity,
+      totalCents,
+      params.user.username ?? params.user.sub,
+      now,
+      params.note?.trim() || null,
+      'manual_simple',
+    )
+
+  appendAudit({
+    db: params.db,
+    dataRoot: params.dataRoot,
+    type: 'deposit_redemption_manual_simple',
+    userId: params.user.sub,
+    payload: {
+      id,
+      eventId: params.eventId?.trim() || null,
+      quantity,
+      amountCents,
+      depositName: params.depositName?.trim() || 'Pfand',
+      depositType: params.depositType ?? null,
+      totalCents,
+    },
+  })
+
+  return {
+    id,
+    mode: 'manual_simple' as const,
+    quantity,
+    amountCents,
+    totalCents,
+    createdAt: now,
   }
 }
 

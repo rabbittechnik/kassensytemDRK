@@ -37,9 +37,9 @@ import { InvoiceSaleModal } from './InvoiceSaleModal'
 import { API_BASE_URL, apiBaseUrl, hasApi } from '../api/config'
 import { apiJson, resolveApiUrl } from '../api/http'
 import {
+  apiCreateManualDepositRedemption,
   apiCreateHelperConsumption,
   apiCreateSale,
-  apiRedeemDepositVoucher,
   type ApiPaymentBody,
 } from '../api/sales'
 import {
@@ -130,6 +130,12 @@ type PendingSale = {
   payment: ApiPaymentBody
   createdAt: number
   eventId?: string
+}
+
+type DepositOption = {
+  name: string
+  amountCents: number
+  type: string | null
 }
 
 const OUTBOX_KEY = 'drk:pending-sales:v1'
@@ -223,9 +229,13 @@ export function PosScreen({
                     ? row.depositAmount
                     : Number(row.deposit_amount ?? 0),
                 depositType:
-                  row.depositType == null ?
+                  row.depositType == null && row.deposit_type == null ?
                     null
-                  : String(row.depositType) as ProductRow['depositType'],
+                  : String(row.depositType ?? row.deposit_type) as ProductRow['depositType'],
+                depositName:
+                  row.depositName == null && row.deposit_name == null ?
+                    null
+                  : String(row.depositName ?? row.deposit_name),
                 imageUrl:
                   row.imageUrl != null ?
                     String(row.imageUrl)
@@ -431,6 +441,13 @@ export function PosScreen({
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperNote, setHelperNote] = useState('')
   const [helperBusy, setHelperBusy] = useState(false)
+  const [depositModalOpen, setDepositModalOpen] = useState(false)
+  const [depositQty, setDepositQty] = useState(1)
+  const [depositAmountCents, setDepositAmountCents] = useState(25)
+  const [depositName, setDepositName] = useState('Flasche/Dose')
+  const [depositType, setDepositType] = useState<string | null>(null)
+  const [depositNote, setDepositNote] = useState('')
+  const [depositBusy, setDepositBusy] = useState(false)
   const [apiDiag, setApiDiag] = useState<{
     baseSet: boolean
     baseUrl: string
@@ -447,7 +464,52 @@ export function PosScreen({
     lastCheckedAt: 0,
   })
 
-  const total = useMemo(() => cart.reduce((s, l) => s + l.priceCents * l.qty, 0), [cart])
+  const productsForCart = remoteMode ? remoteProducts : (dexProducts ?? [])
+  const productById = useMemo(
+    () => new Map(productsForCart.map((p) => [p.id, p])),
+    [productsForCart],
+  )
+  const cartDepositDetails = useMemo(
+    () =>
+      cart.map((l) => {
+        const p = productById.get(l.productId)
+        const enabled = Boolean(p?.depositEnabled) || Number(p?.depositAmount ?? 0) > 0
+        const amountCents = enabled ? Math.max(0, Number(p?.depositAmount ?? 0)) : 0
+        const depositName = (p?.depositName?.trim() || 'Pfand').trim()
+        return {
+          productId: l.productId,
+          qty: l.qty,
+          amountCents,
+          depositName,
+          depositType: p?.depositType ?? null,
+          totalCents: amountCents * l.qty,
+        }
+      }),
+    [cart, productById],
+  )
+  const wareTotal = useMemo(
+    () => cart.reduce((s, l) => s + l.priceCents * l.qty, 0),
+    [cart],
+  )
+  const depositTotal = useMemo(
+    () => cartDepositDetails.reduce((s, d) => s + d.totalCents, 0),
+    [cartDepositDetails],
+  )
+  const totalWithDeposit = wareTotal + depositTotal
+  const depositOptions = useMemo(() => {
+    const map = new Map<string, DepositOption>()
+    for (const p of productsForCart) {
+      const enabled = Boolean(p.depositEnabled) || Number(p.depositAmount ?? 0) > 0
+      const amount = Math.max(0, Number(p.depositAmount ?? 0))
+      if (!enabled || amount <= 0) continue
+      const name = p.depositName?.trim() || 'Pfand'
+      const key = `${name}|${amount}|${p.depositType ?? ''}`
+      if (!map.has(key)) {
+        map.set(key, { name, amountCents: amount, type: p.depositType ?? null })
+      }
+    }
+    return [...map.values()].sort((a, b) => a.amountCents - b.amountCents || a.name.localeCompare(b.name, 'de'))
+  }, [productsForCart])
   const saleAvailability = useMemo(
     () =>
       getSaleAvailability({
@@ -513,6 +575,36 @@ export function PosScreen({
     }
   }, [runApiDiagnostics])
 
+  useEffect(() => {
+    let alive = true
+    void (async () => {
+      if (remoteMode) {
+        try {
+          const settings = await apiJson<{ deposit_default_amount?: string | number }>(
+            '/settings',
+          )
+          const raw = settings?.deposit_default_amount
+          const parsed =
+            typeof raw === 'number' ? raw : Number(String(raw ?? '').trim())
+          if (!alive) return
+          setDepositAmountCents(Number.isFinite(parsed) && parsed > 0 ? parsed : 25)
+          return
+        } catch {
+          // fallback to local setting below
+        }
+      }
+      const localRaw = await getSetting('deposit_default_amount')
+      if (!alive) return
+      const localParsed = Number(localRaw ?? '25')
+      setDepositAmountCents(
+        Number.isFinite(localParsed) && localParsed > 0 ? localParsed : 25,
+      )
+    })()
+    return () => {
+      alive = false
+    }
+  }, [remoteMode])
+
   const handlePwaUpdateCheck = useCallback(async () => {
     setPwaCheckBusy(true)
     try {
@@ -532,53 +624,75 @@ export function PosScreen({
   }, [checkForUpdate])
 
   const handleDepositRedeem = useCallback(async () => {
-    if (demoMode) {
-      const voucherNumber = window.prompt(
-        'Demo-Pfandbonnummer eingeben oder scannen (z. B. PF-2026-000124):',
-      )
-      if (!voucherNumber?.trim()) return
-      showToast(
-        `DEMO: Pfand-Auszahlung simuliert (${voucherNumber.trim().toUpperCase()}).`,
-        4200,
-      )
-      return
-    }
-    const diag = await runApiDiagnostics()
-    const apiConnected =
-      diag.healthReachable && diag.apiReachable && diag.depositEndpointReachable
-    if (!apiJwt) {
-      showToast(
-        'Die Kasse läuft aktuell im Offline-Modus. Pfand-Auszahlung ist nur im Servermodus möglich.',
-        5200,
-      )
-      return
-    }
-    if (!apiConnected) {
-      if (navigator.onLine) {
+    if (!demoMode) {
+      const diag = await runApiDiagnostics()
+      const apiConnected =
+        diag.healthReachable && diag.apiReachable && diag.depositEndpointReachable
+      if (!apiJwt) {
         showToast(
-          'Internet ist vorhanden, aber der Kassen-Server ist nicht erreichbar. Pfand-Auszahlung ist deshalb gesperrt.',
-          6200,
-        )
-      } else {
-        showToast(
-          'Keine Serververbindung für Pfand-Auszahlung. Bitte Netzwerk und Kassen-Server prüfen.',
+          'Die Kasse läuft aktuell im Offline-Modus. Pfand-Auszahlung ist nur im Servermodus möglich.',
           5200,
         )
+        return
       }
-      return
+      if (!apiConnected) {
+        if (navigator.onLine) {
+          showToast(
+            'Internet ist vorhanden, aber der Kassen-Server ist nicht erreichbar. Pfand-Auszahlung ist deshalb gesperrt.',
+            6200,
+          )
+        } else {
+          showToast(
+            'Keine Serververbindung für Pfand-Auszahlung. Bitte Netzwerk und Kassen-Server prüfen.',
+            5200,
+          )
+        }
+        return
+      }
     }
-    const voucherNumber = window.prompt('Pfandbonnummer eingeben oder scannen (z. B. PF-2026-000124):')
-    if (!voucherNumber?.trim()) return
+    setDepositQty(1)
+    setDepositNote('')
+    const first = depositOptions[0]
+    if (first) {
+      setDepositName(first.name)
+      setDepositAmountCents(first.amountCents)
+      setDepositType(first.type)
+    }
+    setDepositModalOpen(true)
+  }, [apiJwt, demoMode, runApiDiagnostics, depositOptions])
+
+  const submitManualDepositRedemption = useCallback(async () => {
+    if (depositBusy) return
+    const qty = Math.max(1, Math.floor(depositQty))
+    const amount = Math.max(1, Math.floor(depositAmountCents))
+    const totalCents = qty * amount
+    setDepositBusy(true)
     try {
-      const out = await apiRedeemDepositVoucher({ voucherNumber: voucherNumber.trim() })
-      showToast(
-        `Pfand ausgezahlt: ${formatMoney(out.amountCents)} (${out.voucherNumber})`,
-        4200,
-      )
+      if (demoMode) {
+        showToast(
+          `DEMO: Pfand ausgezahlt ${qty}x ${formatMoney(amount)} = ${formatMoney(totalCents)}.`,
+          4200,
+        )
+      } else {
+        await apiCreateManualDepositRedemption({
+          eventId: activeEvent?.id ?? null,
+          quantity: qty,
+          amountCents: amount,
+          depositName,
+          depositType,
+          note: depositNote.trim() || undefined,
+        })
+        showToast(`Pfand ausgezahlt: ${formatMoney(totalCents)} (${qty}x).`, 4200)
+      }
+      setDepositModalOpen(false)
+      setDepositNote('')
+      setDepositQty(1)
     } catch (e) {
-      showToast(`Pfand-Einlösung fehlgeschlagen: ${String((e as Error).message ?? e)}`, 5000)
+      showToast(`Pfand-Auszahlung fehlgeschlagen: ${String((e as Error).message ?? e)}`, 5000)
+    } finally {
+      setDepositBusy(false)
     }
-  }, [apiJwt, demoMode, runApiDiagnostics])
+  }, [activeEvent?.id, demoMode, depositAmountCents, depositBusy, depositNote, depositQty, depositName, depositType])
 
   const handleHelperConsumption = useCallback(async () => {
     if (cart.length === 0) {
@@ -764,7 +878,7 @@ export function PosScreen({
         )
         return
       }
-      if (cart.length === 0 || total <= 0) return
+      if (cart.length === 0 || totalWithDeposit <= 0) return
       const snap = [...cart]
 
       // ---------- DEMO-MODUS ----------
@@ -786,6 +900,9 @@ export function PosScreen({
               categoryName: c?.name ?? 'Sonstige',
               categorySort: c?.sortOrder ?? 999,
               outputGroup: og,
+              depositEnabled: Boolean(p.depositEnabled) || Number(p.depositAmount ?? 0) > 0,
+              depositAmount: Number(p.depositAmount ?? 0),
+              depositName: p.depositName ?? null,
             }
           }
           const lines = buildDemoLines(snap, lookup)
@@ -950,7 +1067,7 @@ export function PosScreen({
             receiptNo: sale.receiptNo,
             createdAt: sale.createdAt,
             paymentMethod: method,
-            totalCents: snap.reduce((s, l) => s + l.priceCents * l.qty, 0),
+            totalCents: totalWithDeposit,
             eventId: activeEvent?.id ?? null,
             teamName: method === 'invoice' ? teamName : undefined,
             linesJson: JSON.stringify(models),
@@ -1030,7 +1147,7 @@ export function PosScreen({
     },
     [
       cart,
-      total,
+      totalWithDeposit,
       remoteMode,
       remoteCategories,
       remoteProducts,
@@ -1113,7 +1230,7 @@ export function PosScreen({
         unitCents: l.priceCents,
         lineCents: l.priceCents * l.qty,
       })),
-      totalCents: total,
+      totalCents: totalWithDeposit,
       payment: 'cash',
       footer: footer || 'Noch nicht bezahlt (Vorschau)',
     }
@@ -1126,9 +1243,10 @@ export function PosScreen({
     } else {
       showToast('Entwurf gesendet.')
     }
-  }, [cart, total])
+  }, [cart, totalWithDeposit])
 
-  const modalsBlockKeys = cardOpen || cashOpen || invoiceOpen || helperModalOpen
+  const modalsBlockKeys =
+    cardOpen || cashOpen || invoiceOpen || helperModalOpen || depositModalOpen
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1387,61 +1505,87 @@ export function PosScreen({
                   </tr>
                 </thead>
                 <tbody>
-                  {cart.map((l) => (
-                    <tr
-                      key={l.productId}
-                      className="border-t border-white/10 text-[13px] md:text-sm"
-                    >
-                      <td className="max-w-[120px] truncate py-2 pl-1 font-semibold text-white">
-                        {l.name}
-                      </td>
-                      <td className="py-2">
-                        <div className="flex items-center gap-0.5">
+                  {cart.flatMap((l) => {
+                    const rows: any[] = []
+                    rows.push(
+                      <tr
+                        key={`item-${l.productId}`}
+                        className="border-t border-white/10 text-[13px] md:text-sm"
+                      >
+                        <td className="max-w-[120px] truncate py-2 pl-1 font-semibold text-white">
+                          {l.name}
+                        </td>
+                        <td className="py-2">
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              type="button"
+                              className="h-8 w-8 rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
+                              onClick={() => setQty(l.productId, l.qty - 1)}
+                            >
+                              −
+                            </button>
+                            <span className="w-7 text-center text-[#FFD700]">{l.qty}</span>
+                            <button
+                              type="button"
+                              className="h-8 w-8 rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
+                              onClick={() => setQty(l.productId, l.qty + 1)}
+                            >
+                              +
+                            </button>
+                          </div>
+                        </td>
+                        <td className="py-2 tabular-nums text-neutral-300">
+                          {formatMoney(l.priceCents)}
+                        </td>
+                        <td className="py-2 tabular-nums text-[#FFD700]">
+                          {formatMoney(l.priceCents * l.qty)}
+                        </td>
+                        <td className="py-2">
                           <button
                             type="button"
-                            className="h-8 w-8 rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
-                            onClick={() => setQty(l.productId, l.qty - 1)}
+                            className="font-bold text-[#ff003c] hover:text-red-400"
+                            onClick={() => removeLine(l.productId)}
+                            title="Entfernen"
                           >
-                            −
+                            ✕
                           </button>
-                          <span className="w-7 text-center text-[#FFD700]">{l.qty}</span>
-                          <button
-                            type="button"
-                            className="h-8 w-8 rounded border border-[#ff003c]/50 text-lg text-[#FFD700] hover:bg-red-950/50"
-                            onClick={() => setQty(l.productId, l.qty + 1)}
-                          >
-                            +
-                          </button>
-                        </div>
-                      </td>
-                      <td className="py-2 tabular-nums text-neutral-300">
-                        {formatMoney(l.priceCents)}
-                      </td>
-                      <td className="py-2 tabular-nums text-[#FFD700]">
-                        {formatMoney(l.priceCents * l.qty)}
-                      </td>
-                      <td className="py-2">
-                        <button
-                          type="button"
-                          className="font-bold text-[#ff003c] hover:text-red-400"
-                          onClick={() => removeLine(l.productId)}
-                          title="Entfernen"
-                        >
-                          ✕
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                      </tr>,
+                    )
+                    const dep = cartDepositDetails.find((d) => d.productId === l.productId)
+                    if (dep && dep.totalCents > 0) {
+                      rows.push(
+                        <tr key={`dep-${l.productId}`} className="text-[12px] text-sky-200">
+                          <td className="py-1 pl-6">+ Pfand {dep.depositName}</td>
+                          <td className="py-1 tabular-nums">{dep.qty}x</td>
+                          <td className="py-1 tabular-nums">{formatMoney(dep.amountCents)}</td>
+                          <td className="py-1 tabular-nums">{formatMoney(dep.totalCents)}</td>
+                          <td />
+                        </tr>,
+                      )
+                    }
+                    return rows
+                  })}
                 </tbody>
               </table>
             )}
           </div>
 
-          <div className="flex items-baseline justify-between border-t border-[#ff003c]/35 bg-black/40 px-4 py-4">
-            <span className="text-lg font-black text-[#FFD700]">Gesamtbetrag</span>
-            <span className="text-3xl font-black tabular-nums text-[#FFD700] md:text-4xl">
-              {formatMoney(total)}
-            </span>
+          <div className="space-y-1 border-t border-[#ff003c]/35 bg-black/40 px-4 py-4">
+            <div className="flex items-baseline justify-between text-sm text-slate-300">
+              <span>Warenwert</span>
+              <span className="tabular-nums">{formatMoney(wareTotal)}</span>
+            </div>
+            <div className="flex items-baseline justify-between text-sm text-sky-200">
+              <span>Pfand</span>
+              <span className="tabular-nums">{formatMoney(depositTotal)}</span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-lg font-black text-[#FFD700]">Gesamtbetrag</span>
+              <span className="text-3xl font-black tabular-nums text-[#FFD700] md:text-4xl">
+                {formatMoney(totalWithDeposit)}
+              </span>
+            </div>
           </div>
         </aside>
       </div>
@@ -1500,16 +1644,12 @@ export function PosScreen({
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
           <button
             type="button"
-            disabled={
-              !demoMode &&
-              !(apiJwt && apiDiag.healthReachable && apiDiag.apiReachable && apiDiag.depositEndpointReachable)
-            }
             onClick={() => void handleDepositRedeem()}
             title="Pfandbon prüfen und Pfand zurückzahlen."
             className="flex min-h-[62px] flex-col items-center justify-center rounded-lg border border-sky-500/60 bg-sky-950/25 px-3 py-2 text-sm font-bold uppercase text-sky-100 hover:bg-sky-950/40 disabled:opacity-35"
           >
             Pfand auszahlen
-            <span className="text-[11px] font-semibold text-sky-200">Pfandbon einlösen</span>
+            <span className="text-[11px] font-semibold text-sky-200">Flasche/Bon zurück</span>
           </button>
           </div>
         </div>
@@ -1647,17 +1787,17 @@ export function PosScreen({
               ? 'Schnellabschluss: Kunden- und Servierbon werden gespeichert, aber nicht automatisch gedruckt. Nachdruck unter Admin → Einstellungen → Bon‑Verwaltung.'
               : undefined
           }
-          totalCents={total}
+          totalCents={totalWithDeposit}
           onCancel={closeCashModal}
           onConfirm={async (given) => {
             const skipBon = offlineCashVariant === 'noBon'
             closeCashModal()
-            if (given < total) {
+            if (given < totalWithDeposit) {
               showToast('Gegeben zu niedrig.')
               return
             }
             if (cart.length === 0) return
-            const change = given - total
+            const change = given - totalWithDeposit
             showToast(`Rückgeld: ${formatMoney(change)}`, 2400)
 
             if (remoteMode) {
@@ -1676,7 +1816,7 @@ export function PosScreen({
 
       {cardOpen && (
         <CardPaymentModal
-          totalCents={total}
+          totalCents={totalWithDeposit}
           onCancel={() => setCardOpen(false)}
           onConfirmSuccess={async () => {
             setCardOpen(false)
@@ -1688,7 +1828,7 @@ export function PosScreen({
       {invoiceOpen && (
         <InvoiceSaleModal
           cartLines={cart}
-          totalCents={total}
+          totalCents={totalWithDeposit}
           defaultEventId={activeEvent?.id}
           onCancel={() => setInvoiceOpen(false)}
           onConfirmed={async (p) => {
@@ -1724,7 +1864,7 @@ export function PosScreen({
               Es entsteht kein Umsatz.
             </p>
             <p className="mt-3 text-sm text-slate-200">
-              Warenwert: <span className="font-black text-[#FFD700]">{formatMoney(total)}</span><br />
+              Warenwert: <span className="font-black text-[#FFD700]">{formatMoney(wareTotal)}</span><br />
               Zu zahlen: <span className="font-black text-emerald-200">0,00 EUR</span>
             </p>
             <label className="mt-4 block text-xs text-slate-400">Notiz (optional)</label>
@@ -1752,6 +1892,90 @@ export function PosScreen({
                 className="rounded-xl border border-emerald-400/60 bg-emerald-700/80 px-4 py-2 text-sm font-black uppercase text-white disabled:opacity-50"
               >
                 {helperBusy ? 'Buchen…' : 'Helferverpflegung buchen'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {depositModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="panel-glass w-full max-w-md rounded-2xl border border-sky-500/50 p-5">
+            <h3 className="text-lg font-black uppercase text-sky-100">Pfand auszahlen</h3>
+            <p className="mt-3 text-sm text-slate-200">
+              Pfandbetrag pro Stück:{' '}
+              <span className="font-black text-[#FFD700]">{formatMoney(depositAmountCents)}</span>
+            </p>
+            <label className="mt-3 block text-xs text-slate-400">Pfandart</label>
+            <select
+              className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+              value={`${depositName}|${depositAmountCents}|${depositType ?? ''}`}
+              onChange={(e) => {
+                const [name, amount, type] = e.target.value.split('|')
+                setDepositName(name)
+                setDepositAmountCents(Number(amount))
+                setDepositType(type || null)
+              }}
+            >
+              {(depositOptions.length > 0 ? depositOptions : [{ name: 'Flasche/Dose', amountCents: depositAmountCents, type: depositType }]).map((opt) => (
+                <option
+                  key={`${opt.name}|${opt.amountCents}|${opt.type ?? ''}`}
+                  value={`${opt.name}|${opt.amountCents}|${opt.type ?? ''}`}
+                >
+                  {opt.name} - {formatMoney(opt.amountCents)}
+                </option>
+              ))}
+            </select>
+            <div className="mt-4 flex items-center gap-2">
+              <span className="text-sm text-slate-300">Menge</span>
+              <button
+                type="button"
+                disabled={depositBusy}
+                className="h-9 w-9 rounded border border-sky-500/60 text-lg text-sky-100 hover:bg-sky-950/35 disabled:opacity-40"
+                onClick={() => setDepositQty((v) => Math.max(1, v - 1))}
+              >
+                −
+              </button>
+              <span className="w-10 text-center text-lg font-black text-[#FFD700]">{depositQty}</span>
+              <button
+                type="button"
+                disabled={depositBusy}
+                className="h-9 w-9 rounded border border-sky-500/60 text-lg text-sky-100 hover:bg-sky-950/35 disabled:opacity-40"
+                onClick={() => setDepositQty((v) => v + 1)}
+              >
+                +
+              </button>
+            </div>
+            <p className="mt-4 text-sm text-slate-200">
+              Auszahlungsbetrag:{' '}
+              <span className="font-black text-sky-200">-{formatMoney(depositQty * depositAmountCents)}</span>
+            </p>
+            <label className="mt-4 block text-xs text-slate-400">Notiz (optional)</label>
+            <textarea
+              className="mt-1 min-h-[70px] w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+              value={depositNote}
+              onChange={(e) => setDepositNote(e.target.value)}
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={depositBusy}
+                onClick={() => {
+                  setDepositModalOpen(false)
+                  setDepositNote('')
+                  setDepositQty(1)
+                }}
+                className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-slate-300"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                disabled={depositBusy}
+                onClick={() => void submitManualDepositRedemption()}
+                className="rounded-xl border border-sky-400/60 bg-sky-700/80 px-4 py-2 text-sm font-black uppercase text-white disabled:opacity-50"
+              >
+                {depositBusy ? 'Buchen…' : 'Pfand auszahlen'}
               </button>
             </div>
           </div>

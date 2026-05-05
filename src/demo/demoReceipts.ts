@@ -43,6 +43,10 @@ export interface DemoReceiptInput {
 }
 
 export function formatDemoCustomerReceipt(p: DemoReceiptInput): string {
+  const depositCents = p.lines
+    .filter((l) => l.productId.startsWith('deposit:') || l.name.toLowerCase().startsWith('pfand '))
+    .reduce((s, l) => s + l.lineTotalCents, 0)
+  const wareCents = p.totalCents - depositCents
   const w = WIDTH
   const out: string[] = []
   out.push(center('*** DEMO-BON ***', w))
@@ -65,6 +69,8 @@ export function formatDemoCustomerReceipt(p: DemoReceiptInput): string {
     out.push((pad(head, maxHead) + tail).slice(0, w))
   }
   out.push(fill('-', w))
+  out.push(lpad(`Warenwert: ${formatMoney(wareCents).replace('€', 'EUR')}`, w))
+  out.push(lpad(`Pfand: ${formatMoney(depositCents).replace('€', 'EUR')}`, w))
   out.push(lpad(`Gesamt: ${formatMoney(p.totalCents).replace('€', 'EUR')}`, w))
   out.push(`Zahlung: ${payCustomer(p.paymentMethod)}`)
   if (p.paymentMethod === 'invoice' && p.teamName?.trim()) {

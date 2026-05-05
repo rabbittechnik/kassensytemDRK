@@ -136,8 +136,31 @@ export class DrkKasseDB extends Dexie {
       })
       await tx.table<SaleLineRow, string>('saleLines').toCollection().modify((l) => {
         if (l.depositAmountCents == null) l.depositAmountCents = 0
+        if (l.depositNameSnapshot == null) l.depositNameSnapshot = null
         if (l.depositQty == null) l.depositQty = 0
         if (l.depositTotalCents == null) l.depositTotalCents = 0
+      })
+    })
+    this.version(6).stores({
+      categories: 'id, sortOrder, name',
+      products: 'id, categoryId, active, sortOrder, name, depositEnabled, depositName',
+      sales: 'id, dayKey, createdAt, receiptNo, eventId, depositVoucherNumber',
+      saleLines: 'id, saleId, categoryId, productId',
+      settings: 'key',
+      dualReceiptArchive: 'id, serverSaleId, receiptNo, createdAt',
+      receiptReprintLogs: '++id, saleRef, at',
+      events: 'id, status, startDate, endDate, name',
+      helpers: 'id, active, name',
+      helperConsumptions: 'id, helperGroup, consumptionType, eventId, createdAt, saleLikeNumber',
+      helperConsumptionItems: 'id, helperConsumptionId, productId',
+    }).upgrade(async (tx) => {
+      await tx.table<ProductRow, string>('products').toCollection().modify((p) => {
+        if (p.depositName == null && (p.depositEnabled || Number(p.depositAmount ?? 0) > 0)) {
+          p.depositName = 'Flasche/Dose'
+        }
+      })
+      await tx.table<SaleLineRow, string>('saleLines').toCollection().modify((l) => {
+        if (l.depositNameSnapshot == null) l.depositNameSnapshot = null
       })
     })
   }

@@ -15,9 +15,10 @@ const OUTPUT_GROUP_OPTIONS: { value: ProductOutputGroup; label: string }[] = [
   { value: 'keine_ausgabe', label: 'Keine Ausgabe' },
 ]
 const DEPOSIT_TYPE_OPTIONS: { value: DepositType; label: string }[] = [
-  { value: 'flasche', label: 'Flasche' },
-  { value: 'dose', label: 'Dose' },
+  { value: 'flasche_dose', label: 'Flasche/Dose' },
   { value: 'becher', label: 'Becher' },
+  { value: 'schale', label: 'Schale' },
+  { value: 'teller', label: 'Teller' },
   { value: 'sonstiges', label: 'Sonstiges' },
 ]
 import { TeamsBilling } from './TeamsBilling'
@@ -253,8 +254,9 @@ function ProductEditor(props: {
     (((existing?.depositAmount ?? 0) as number) / 100).toFixed(2).replace('.', ','),
   )
   const [depositType, setDepositType] = useState<DepositType>(
-    existing?.depositType ?? 'flasche',
+    existing?.depositType ?? 'flasche_dose',
   )
+  const [depositName, setDepositName] = useState(existing?.depositName ?? 'Flasche/Dose')
 
   const save = useCallback(async () => {
     const euros = parseFloat(priceStr.replace(',', '.'))
@@ -262,6 +264,11 @@ function ProductEditor(props: {
     const priceCents = Math.round(euros * 100)
     const depEuro = parseFloat(depositAmountStr.replace(',', '.'))
     const depositAmount = Number.isNaN(depEuro) ? 0 : Math.max(0, Math.round(depEuro * 100))
+    const effectiveDepositEnabled = depositEnabled || depositAmount > 0
+    if (effectiveDepositEnabled && depositAmount <= 0) {
+      alert('Pfand aktiv benötigt einen Pfandbetrag größer 0,00 EUR.')
+      return
+    }
     if (isNew) {
       const max =
         (await db.products.orderBy('sortOrder').last())?.sortOrder ?? 0
@@ -276,9 +283,10 @@ function ProductEditor(props: {
         ...(imageUrl.trim() ?
           { imageUrl: imageUrl.trim() }
         : {}),
-        depositEnabled,
+        depositEnabled: effectiveDepositEnabled,
         depositAmount,
-        depositType: depositEnabled ? depositType : null,
+        depositName: effectiveDepositEnabled ? (depositName.trim() || 'Pfand') : null,
+        depositType: effectiveDepositEnabled ? depositType : null,
       })
     } else if (existing) {
       await db.products.update(existing.id, {
@@ -288,9 +296,10 @@ function ProductEditor(props: {
         active,
         outputGroup,
         imageUrl: imageUrl.trim() ? imageUrl.trim() : null,
-        depositEnabled,
+        depositEnabled: effectiveDepositEnabled,
         depositAmount,
-        depositType: depositEnabled ? depositType : null,
+        depositName: effectiveDepositEnabled ? (depositName.trim() || 'Pfand') : null,
+        depositType: effectiveDepositEnabled ? depositType : null,
       })
     }
     onClose()
@@ -300,6 +309,7 @@ function ProductEditor(props: {
     existing,
     imageUrl,
     depositEnabled,
+    depositName,
     depositAmountStr,
     depositType,
     isNew,
@@ -386,6 +396,15 @@ function ProductEditor(props: {
           disabled={!depositEnabled}
           value={depositAmountStr}
           onChange={(e) => setDepositAmountStr(e.target.value)}
+        />
+        <label className="mt-3 block text-sm text-slate-400">Pfandtyp</label>
+        <label className="mt-3 block text-sm text-slate-400">Pfandname</label>
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white disabled:opacity-50"
+          disabled={!depositEnabled && Number((parseFloat(depositAmountStr.replace(',', '.')) || 0)) <= 0}
+          value={depositName}
+          onChange={(e) => setDepositName(e.target.value)}
+          placeholder="Flasche/Dose"
         />
         <label className="mt-3 block text-sm text-slate-400">Pfandtyp</label>
         <select
@@ -643,6 +662,7 @@ function BonSettingsBlock() {
   const depDefault = useLiveQuery(() => db.settings.where('key').equals('deposit_default_amount').first(), [])
   const depAutoVoucher = useLiveQuery(() => db.settings.where('key').equals('deposit_auto_print_voucher').first(), [])
   const depPrintRedeem = useLiveQuery(() => db.settings.where('key').equals('deposit_print_redemption_receipt').first(), [])
+  const depShowOnOutput = useLiveQuery(() => db.settings.where('key').equals('deposit_show_on_output_bons').first(), [])
   const helpersDeposit = useLiveQuery(() => db.settings.where('key').equals('helpers_deposit_enabled').first(), [])
   const tag = useLiveQuery(() => db.settings.where('key').equals('receiptTagline').first(), [])
   const reg = useLiveQuery(() => db.settings.where('key').equals('registerName').first(), [])
@@ -758,6 +778,14 @@ function BonSettingsBlock() {
             onChange={(e) => void setSetting('deposit_print_redemption_receipt', e.target.checked ? '1' : '0')}
           />
           Pfandauszahlungsbeleg drucken
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={depShowOnOutput?.value === '1'}
+            onChange={(e) => void setSetting('deposit_show_on_output_bons', e.target.checked ? '1' : '0')}
+          />
+          Pfand auf Ausgabe-Bons anzeigen
         </label>
         <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
           <input

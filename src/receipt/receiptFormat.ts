@@ -202,6 +202,10 @@ export function formatServingReceipt80mm(p: ServingReceiptParams): string {
 
 function formatCustomerReceipt(p: FormatReceiptParams, w: number): string {
   const lines: string[] = []
+  const depositCents = p.lines
+    .filter((row) => (row.productId ?? '').startsWith('deposit:') || row.name.toLowerCase().startsWith('pfand '))
+    .reduce((s, row) => s + row.lineCents, 0)
+  const wareCents = p.totalCents - depositCents
   if (p.isReprint) {
     lines.push(padCenter(RECEIPT_COPY_HEADER, w))
     lines.push('')
@@ -231,6 +235,10 @@ function formatCustomerReceipt(p: FormatReceiptParams, w: number): string {
     })
   }
   lines.push(fillLine('-', w))
+  if (depositCents > 0) {
+    lines.push(lpad(`Warenwert: ${formatMoney(wareCents)}`, w))
+    lines.push(lpad(`Pfand: ${formatMoney(depositCents)}`, w))
+  }
   lines.push(lpad(`Gesamt: ${formatMoney(p.totalCents)}`, w))
   lines.push(`Zahlung: ${payLabelCustomer(p.payment)}`)
   if (p.payment === 'invoice' && p.teamName?.trim()) {

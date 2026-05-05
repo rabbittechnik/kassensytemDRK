@@ -81,12 +81,23 @@ export function seedIfNeeded(
       `INSERT INTO categories (id, name, sort_order) VALUES (?,?,?)`,
     )
     const ip = db.prepare(
-      `INSERT INTO products (id, category_id, name, price_cents, active, sort_order, vat_rate_percent)
-       VALUES (?,?,?,?,1,?,19)`,
+      `INSERT INTO products (id, category_id, name, price_cents, active, sort_order, vat_rate_percent, deposit_enabled, deposit_amount, deposit_name, deposit_type)
+       VALUES (?,?,?,?,1,?,19,?,?,?,?)`,
     )
     for (const c of defaultCategories) ic.run(c.id, c.name, c.sortOrder)
     for (const p of products()) {
-      ip.run(p.id, p.categoryId, p.name, p.priceCents, p.sortOrder)
+      const isDrinkDeposit = ['p-wasser', 'p-cola', 'p-fanta', 'p-spezi'].includes(p.id)
+      ip.run(
+        p.id,
+        p.categoryId,
+        p.name,
+        p.priceCents,
+        p.sortOrder,
+        isDrinkDeposit ? 1 : 0,
+        isDrinkDeposit ? 25 : 0,
+        isDrinkDeposit ? 'Flasche/Dose' : null,
+        isDrinkDeposit ? 'flasche_dose' : null,
+      )
     }
   }
 

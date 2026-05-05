@@ -57,7 +57,8 @@ function defaultProducts(): {
 function defaultDepositForProduct(id: string): {
   depositEnabled: boolean
   depositAmount: number
-  depositType: 'flasche' | 'dose' | 'becher' | 'sonstiges' | null
+  depositName: string | null
+  depositType: 'flasche_dose' | 'becher' | 'schale' | 'teller' | 'sonstiges' | null
 } {
   if (
     [
@@ -73,9 +74,9 @@ function defaultDepositForProduct(id: string): {
       'p-bitterlemon',
     ].includes(id)
   ) {
-    return { depositEnabled: true, depositAmount: 25, depositType: 'flasche' }
+    return { depositEnabled: true, depositAmount: 25, depositName: 'Flasche/Dose', depositType: 'flasche_dose' }
   }
-  return { depositEnabled: false, depositAmount: 0, depositType: null }
+  return { depositEnabled: false, depositAmount: 0, depositName: null, depositType: null }
 }
 
 /** Zusätzliche Artikel & DLRG-Branding für bestehende Installationen */
@@ -140,6 +141,7 @@ async function ensureBonSettings(): Promise<void> {
     ['deposit_default_amount', '25'],
     ['deposit_auto_print_voucher', '1'],
     ['deposit_print_redemption_receipt', '0'],
+    ['deposit_show_on_output_bons', '0'],
     ['helpers_deposit_enabled', '0'],
     [
       'receiptTagline',

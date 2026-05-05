@@ -36,6 +36,7 @@ const MIGRATIONS: string[] = [
     stock_min INTEGER,
     deposit_enabled INTEGER NOT NULL DEFAULT 0,
     deposit_amount INTEGER NOT NULL DEFAULT 0,
+    deposit_name TEXT,
     deposit_type TEXT
   );
 
@@ -146,6 +147,7 @@ const MIGRATIONS: string[] = [
     line_total_cents INTEGER NOT NULL,
     vat_rate_percent INTEGER NOT NULL DEFAULT 19,
     deposit_amount_cents INTEGER NOT NULL DEFAULT 0,
+    deposit_name_snapshot TEXT,
     deposit_qty INTEGER NOT NULL DEFAULT 0,
     deposit_total_cents INTEGER NOT NULL DEFAULT 0
   );
@@ -247,12 +249,18 @@ const MIGRATIONS: string[] = [
 
   CREATE TABLE IF NOT EXISTS deposit_redemptions (
     id TEXT PRIMARY KEY,
-    voucher_id TEXT NOT NULL REFERENCES deposit_vouchers(id),
+    voucher_id TEXT REFERENCES deposit_vouchers(id),
+    event_id TEXT REFERENCES events(id),
     amount_cents INTEGER NOT NULL,
+    deposit_name TEXT,
+    deposit_type TEXT,
     quantity INTEGER NOT NULL,
+    total_cents INTEGER NOT NULL DEFAULT 0,
     cashier TEXT,
     redeemed_at INTEGER NOT NULL,
-    note TEXT
+    created_at INTEGER,
+    note TEXT,
+    mode TEXT NOT NULL DEFAULT 'voucher'
   );
 
   CREATE INDEX IF NOT EXISTS idx_deposit_redemptions_voucher ON deposit_redemptions(voucher_id);
@@ -311,6 +319,9 @@ const MIGRATIONS: string[] = [
     cash_total_cents INTEGER NOT NULL,
     card_total_cents INTEGER NOT NULL,
     invoice_total_cents INTEGER NOT NULL,
+    deposit_collected_cents INTEGER NOT NULL DEFAULT 0,
+    deposit_paid_out_cents INTEGER NOT NULL DEFAULT 0,
+    deposit_balance_cents INTEGER NOT NULL DEFAULT 0,
     storno_count INTEGER NOT NULL DEFAULT 0,
     storno_total_cents INTEGER NOT NULL DEFAULT 0,
     sales_count INTEGER NOT NULL DEFAULT 0,
@@ -350,6 +361,7 @@ export function migrate(db: BetterSqlite3.Database) {
   ensureColumn(db, 'products', 'stock_min', 'INTEGER')
   ensureColumn(db, 'products', 'deposit_enabled', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'products', 'deposit_amount', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'products', 'deposit_name', 'TEXT')
   ensureColumn(db, 'products', 'deposit_type', 'TEXT')
   ensureColumn(db, 'sales', 'tse_start_time', 'INTEGER')
   ensureColumn(db, 'sales', 'tse_end_time', 'INTEGER')
@@ -367,8 +379,18 @@ export function migrate(db: BetterSqlite3.Database) {
   ensureColumn(db, 'teams', 'short_name', 'TEXT')
   ensureColumn(db, 'sales', 'deposit_total_cents', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'sale_lines', 'deposit_amount_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'sale_lines', 'deposit_name_snapshot', 'TEXT')
   ensureColumn(db, 'sale_lines', 'deposit_qty', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'sale_lines', 'deposit_total_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'deposit_redemptions', 'event_id', 'TEXT')
+  ensureColumn(db, 'deposit_redemptions', 'deposit_name', 'TEXT')
+  ensureColumn(db, 'deposit_redemptions', 'deposit_type', 'TEXT')
+  ensureColumn(db, 'deposit_redemptions', 'total_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'deposit_redemptions', 'created_at', 'INTEGER')
+  ensureColumn(db, 'deposit_redemptions', 'mode', "TEXT NOT NULL DEFAULT 'voucher'")
+  db.exec(`UPDATE deposit_redemptions SET total_cents = amount_cents WHERE COALESCE(total_cents, 0) = 0`)
+  db.exec(`UPDATE deposit_redemptions SET created_at = redeemed_at WHERE created_at IS NULL`)
+  migrateDepositRedemptionsIfNeeded(db)
   ensureColumn(
     db,
     'helper_consumptions',
@@ -383,12 +405,16 @@ export function migrate(db: BetterSqlite3.Database) {
   )
   migrateEventsSchemaIfNeeded(db)
   ensureColumn(db, 'day_closings', 'event_id', 'TEXT')
+  ensureColumn(db, 'day_closings', 'deposit_collected_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'day_closings', 'deposit_paid_out_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'day_closings', 'deposit_balance_cents', 'INTEGER NOT NULL DEFAULT 0')
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('active_event_id', '')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_sales_without_event', '1')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_feature_enabled', '1')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_default_amount', '25')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_auto_print_voucher', '1')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_print_redemption_receipt', '0')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_show_on_output_bons', '0')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('helpers_deposit_enabled', '0')`).run()
 }
 
@@ -429,6 +455,59 @@ function migrateEventsSchemaIfNeeded(db: BetterSqlite3.Database) {
     DROP TABLE events;
     ALTER TABLE events_new RENAME TO events;
     CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
+    COMMIT;
+    PRAGMA foreign_keys = ON;
+  `)
+}
+
+function migrateDepositRedemptionsIfNeeded(db: BetterSqlite3.Database) {
+  const cols = db.prepare(`PRAGMA table_info(deposit_redemptions)`).all() as Array<{
+    name: string
+    notnull: number
+  }>
+  if (cols.length === 0) return
+  const voucher = cols.find((c) => c.name === 'voucher_id')
+  if (!voucher || voucher.notnull === 0) return
+  db.exec(`
+    PRAGMA foreign_keys = OFF;
+    BEGIN TRANSACTION;
+    CREATE TABLE deposit_redemptions_new (
+      id TEXT PRIMARY KEY,
+      voucher_id TEXT REFERENCES deposit_vouchers(id),
+      event_id TEXT REFERENCES events(id),
+      amount_cents INTEGER NOT NULL,
+      deposit_name TEXT,
+      deposit_type TEXT,
+      quantity INTEGER NOT NULL,
+      total_cents INTEGER NOT NULL DEFAULT 0,
+      cashier TEXT,
+      redeemed_at INTEGER NOT NULL,
+      created_at INTEGER,
+      note TEXT,
+      mode TEXT NOT NULL DEFAULT 'voucher'
+    );
+    INSERT INTO deposit_redemptions_new (
+      id, voucher_id, event_id, amount_cents, deposit_name, deposit_type, quantity, total_cents, cashier,
+      redeemed_at, created_at, note, mode
+    )
+    SELECT
+      id,
+      voucher_id,
+      NULL,
+      amount_cents,
+      NULL,
+      NULL,
+      quantity,
+      COALESCE(NULLIF(total_cents, 0), amount_cents),
+      cashier,
+      redeemed_at,
+      COALESCE(created_at, redeemed_at),
+      note,
+      COALESCE(mode, 'voucher')
+    FROM deposit_redemptions;
+    DROP TABLE deposit_redemptions;
+    ALTER TABLE deposit_redemptions_new RENAME TO deposit_redemptions;
+    CREATE INDEX IF NOT EXISTS idx_deposit_redemptions_voucher ON deposit_redemptions(voucher_id);
     COMMIT;
     PRAGMA foreign_keys = ON;
   `)

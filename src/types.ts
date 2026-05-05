@@ -1,5 +1,5 @@
 export type PaymentMethod = 'cash' | 'card' | 'invoice'
-export type DepositType = 'flasche' | 'dose' | 'becher' | 'sonstiges'
+export type DepositType = 'flasche_dose' | 'becher' | 'schale' | 'teller' | 'sonstiges'
 
 /** Zuordnung zu Ausgabestellen für Servier-/Ausgabe-Bons (nicht gleich Produkt-Kategorie). */
 export type ProductOutputGroup =
@@ -56,6 +56,7 @@ export interface ProductRow {
   stockMin?: number | null
   depositEnabled?: boolean
   depositAmount?: number
+  depositName?: string | null
   depositType?: DepositType | null
 }
 
@@ -144,6 +145,7 @@ export interface SaleLineRow {
   unitPriceCents: number
   lineTotalCents: number
   depositAmountCents?: number
+  depositNameSnapshot?: string | null
   depositQty?: number
   depositTotalCents?: number
 }

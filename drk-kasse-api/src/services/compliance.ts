@@ -262,6 +262,26 @@ export function createDailyClosing(params: {
   const stornoTotal = sales
     .filter((s) => Number(s.reverses_sale_id ? 1 : 0) === 1)
     .reduce((a, s) => a + Math.abs(Number(s.total_cents ?? 0)), 0)
+  const depositCollected = sales.reduce((a, s) => a + Number(s.deposit_total_cents ?? 0), 0)
+  const depositPaidOutRow = (
+    eid ?
+      params.db
+        .prepare(
+          `SELECT COALESCE(SUM(total_cents), 0) as total
+           FROM deposit_redemptions
+           WHERE redeemed_at BETWEEN ? AND ? AND event_id = ?`,
+        )
+        .get(periodStart, periodEnd, eid)
+    : params.db
+        .prepare(
+          `SELECT COALESCE(SUM(total_cents), 0) as total
+           FROM deposit_redemptions
+           WHERE redeemed_at BETWEEN ? AND ?`,
+        )
+        .get(periodStart, periodEnd)
+  ) as { total: number } | undefined
+  const depositPaidOut = Number(depositPaidOutRow?.total ?? 0)
+  const depositBalance = depositCollected - depositPaidOut
 
   const catMap = new Map<string, number>()
   for (const ln of lines) {
@@ -300,6 +320,9 @@ export function createDailyClosing(params: {
   csvRows.push(`bar_cents;${cash}`)
   csvRows.push(`karte_cents;${card}`)
   csvRows.push(`rechnung_cents;${invoice}`)
+  csvRows.push(`pfand_gesammelt_cents;${depositCollected}`)
+  csvRows.push(`pfand_ausgezahlt_cents;${depositPaidOut}`)
+  csvRows.push(`pfand_saldo_cents;${depositBalance}`)
   csvRows.push(`event_id;${eid ?? ''}`)
   csvRows.push(`anzahl_verkaeufe;${sales.length}`)
   csvRows.push(`anzahl_stornos;${stornoCount}`)
@@ -325,6 +348,9 @@ export function createDailyClosing(params: {
   doc.text(`Verkäufe: ${sales.length} | Stornos: ${stornoCount}`)
   doc.text(`Gesamtumsatz: ${fmtEur(total)}`)
   doc.text(`Bar: ${fmtEur(cash)} | Karte: ${fmtEur(card)} | Rechnung: ${fmtEur(invoice)}`)
+  doc.text(`Pfand gesammelt: ${fmtEur(depositCollected)}`)
+  doc.text(`Pfand ausgezahlt: ${fmtEur(depositPaidOut)}`)
+  doc.text(`Pfandsaldo: ${fmtEur(depositBalance)}`)
   doc.text(`Storno-Summe: ${fmtEur(stornoTotal)}`)
   if (params.actualCashDrawerCents != null) {
     doc.text(`Kassen-Ist: ${fmtEur(params.actualCashDrawerCents)}`)
@@ -349,10 +375,11 @@ export function createDailyClosing(params: {
       .prepare(
         `INSERT INTO day_closings (
           id, closing_number, day_key, period_start, period_end, gross_total_cents, cash_total_cents,
-          card_total_cents, invoice_total_cents, storno_count, storno_total_cents, sales_count,
+          card_total_cents, invoice_total_cents, deposit_collected_cents, deposit_paid_out_cents, deposit_balance_cents,
+          storno_count, storno_total_cents, sales_count,
           users_json, by_category_json, expected_cash_drawer_cents, actual_cash_drawer_cents,
           drawer_diff_cents, csv_rel_path, pdf_rel_path, created_by_user_id, created_at, event_id
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         id,
@@ -364,6 +391,9 @@ export function createDailyClosing(params: {
         cash,
         card,
         invoice,
+        depositCollected,
+        depositPaidOut,
+        depositBalance,
         stornoCount,
         stornoTotal,
         sales.length,

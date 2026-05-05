@@ -348,16 +348,23 @@ export function buildDemoLines(
     categoryName: string
     categorySort: number
     outputGroup: ProductOutputGroup
+    depositEnabled?: boolean
+    depositAmount?: number
+    depositName?: string | null
   } | null,
 ): DemoSaleLine[] {
-  return cart.map((l) => {
+  const out: DemoSaleLine[] = []
+  for (const l of cart) {
     const meta = productLookup(l.productId) ?? {
       categoryId: 'unknown',
       categoryName: 'Sonstige',
       categorySort: 999,
       outputGroup: defaultOutputGroupForProduct(l.productId, l.name),
+      depositEnabled: false,
+      depositAmount: 0,
+      depositName: null,
     }
-    return {
+    out.push({
       productId: l.productId,
       name: l.name,
       qty: l.qty,
@@ -367,6 +374,22 @@ export function buildDemoLines(
       categoryName: meta.categoryName,
       categorySort: meta.categorySort,
       outputGroup: meta.outputGroup,
+    })
+    const depEnabled = Boolean(meta.depositEnabled) || Number(meta.depositAmount ?? 0) > 0
+    const depAmount = depEnabled ? Math.max(0, Number(meta.depositAmount ?? 0)) : 0
+    if (depAmount > 0) {
+      out.push({
+        productId: `deposit:${l.productId}`,
+        name: `Pfand ${meta.depositName?.trim() || 'Pfand'}`,
+        qty: l.qty,
+        unitPriceCents: depAmount,
+        lineTotalCents: depAmount * l.qty,
+        categoryId: meta.categoryId,
+        categoryName: meta.categoryName,
+        categorySort: meta.categorySort,
+        outputGroup: 'keine_ausgabe',
+      })
     }
-  })
+  }
+  return out
 }

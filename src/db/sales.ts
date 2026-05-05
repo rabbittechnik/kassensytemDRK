@@ -51,10 +51,11 @@ export function buildReceiptLineModelsFromCatalog(
   products: ProductRow[],
   categories: CategoryRow[],
 ): ReceiptLineModel[] {
-  return lines.map((l) => {
+  const out: ReceiptLineModel[] = []
+  for (const l of lines) {
     const p = products.find((x) => x.id === l.productId)
     const c = p ? categories.find((x) => x.id === p.categoryId) : undefined
-    return {
+    out.push({
       productId: l.productId,
       outputGroup: modelProductOutputGroup(p),
       name: l.name,
@@ -64,8 +65,24 @@ export function buildReceiptLineModelsFromCatalog(
       categoryId: p?.categoryId ?? 'unknown',
       categoryName: c?.name ?? 'Sonstige',
       categorySort: c?.sortOrder ?? 999,
+    })
+    const depEnabled = Boolean(p?.depositEnabled) || Number(p?.depositAmount ?? 0) > 0
+    const depAmount = depEnabled ? Math.max(0, Number(p?.depositAmount ?? 0)) : 0
+    if (depAmount > 0) {
+      out.push({
+        productId: `deposit:${l.productId}`,
+        outputGroup: 'keine_ausgabe',
+        name: `Pfand ${p?.depositName?.trim() || 'Pfand'}`,
+        qty: l.qty,
+        unitCents: depAmount,
+        lineCents: depAmount * l.qty,
+        categoryId: p?.categoryId ?? 'unknown',
+        categoryName: c?.name ?? 'Sonstige',
+        categorySort: c?.sortOrder ?? 999,
+      })
     }
-  })
+  }
+  return out
 }
 
 export async function buildReceiptLineModels(lines: CartLine[]): Promise<ReceiptLineModel[]> {
@@ -84,6 +101,21 @@ export async function buildReceiptLineModels(lines: CartLine[]): Promise<Receipt
       categoryName: c?.name ?? 'Sonstige',
       categorySort: c?.sortOrder ?? 999,
     })
+    const depEnabled = Boolean(p?.depositEnabled) || Number(p?.depositAmount ?? 0) > 0
+    const depAmount = depEnabled ? Math.max(0, Number(p?.depositAmount ?? 0)) : 0
+    if (depAmount > 0) {
+      out.push({
+        productId: `deposit:${l.productId}`,
+        outputGroup: 'keine_ausgabe',
+        name: `Pfand ${p?.depositName?.trim() || 'Pfand'}`,
+        qty: l.qty,
+        unitCents: depAmount,
+        lineCents: depAmount * l.qty,
+        categoryId: p?.categoryId ?? 'unknown',
+        categoryName: c?.name ?? 'Sonstige',
+        categorySort: c?.sortOrder ?? 999,
+      })
+    }
   }
   return out
 }
@@ -241,7 +273,14 @@ export async function completeLocalSaleWithDualReceipts(
   customerReceiptText: string
   outputReceipts: OutputReceiptStored[]
 }> {
-  const totalCents = lines.reduce((s, l) => s + l.priceCents * l.qty, 0)
+  let depositTotalCents = 0
+  for (const l of lines) {
+    const p = await db.products.get(l.productId)
+    const depEnabled = Boolean(p?.depositEnabled) || Number(p?.depositAmount ?? 0) > 0
+    const depAmount = depEnabled ? Math.max(0, Number(p?.depositAmount ?? 0)) : 0
+    depositTotalCents += depAmount * l.qty
+  }
+  const totalCents = lines.reduce((s, l) => s + l.priceCents * l.qty, 0) + depositTotalCents
   const createdAt = Date.now()
   const dayKey = todayKey(new Date(createdAt))
   const saleId = uid()
@@ -286,11 +325,14 @@ export async function completeLocalSaleWithDualReceipts(
       customerReceiptPrintCount: 0,
       servingReceiptPrintCount: 0,
       invoiceTeamNameSnapshot: opts?.invoiceTeamName,
+      depositTotalCents,
       ...(opts?.eventId ? { eventId: opts.eventId } : {}),
     })
     for (const l of lines) {
       const cat = await db.products.get(l.productId)
       const categoryId = cat?.categoryId ?? 'unknown'
+      const depEnabled = Boolean(cat?.depositEnabled) || Number(cat?.depositAmount ?? 0) > 0
+      const depAmount = depEnabled ? Math.max(0, Number(cat?.depositAmount ?? 0)) : 0
       await db.saleLines.add({
         id: uid(),
         saleId,
@@ -300,6 +342,10 @@ export async function completeLocalSaleWithDualReceipts(
         qty: l.qty,
         unitPriceCents: l.priceCents,
         lineTotalCents: l.priceCents * l.qty,
+        depositAmountCents: depAmount,
+        depositNameSnapshot: depAmount > 0 ? (cat?.depositName?.trim() || 'Pfand') : null,
+        depositQty: depAmount > 0 ? l.qty : 0,
+        depositTotalCents: depAmount * l.qty,
       })
     }
   })

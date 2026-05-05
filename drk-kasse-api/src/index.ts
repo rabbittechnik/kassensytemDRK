@@ -14,6 +14,7 @@ import { sha256Hex } from './lib/pin.js'
 import type { JwtUser } from './types.js'
 import { appendAudit } from './audit.js'
 import {
+  createManualDepositRedemption,
   createHelperConsumption,
   createSale,
   getDepositVoucherByNumber,
@@ -145,6 +146,7 @@ async function guardedRoutes(app: FastifyInstance) {
          stock_min as stockMin,
          deposit_enabled as depositEnabled,
          deposit_amount as depositAmount,
+         deposit_name as depositName,
          deposit_type as depositType
        FROM products ORDER BY category_id, sort_order`,
       )
@@ -164,6 +166,7 @@ async function guardedRoutes(app: FastifyInstance) {
         stockMin: z.number().int().nullable().optional(),
         depositEnabled: z.boolean().optional(),
         depositAmount: z.number().int().nonnegative().optional(),
+        depositName: z.string().nullable().optional(),
         depositType: z.string().nullable().optional(),
       })
       .parse(req.body ?? {})
@@ -180,6 +183,7 @@ async function guardedRoutes(app: FastifyInstance) {
           stock_min = COALESCE(?, stock_min),
           deposit_enabled = COALESCE(?, deposit_enabled),
           deposit_amount = COALESCE(?, deposit_amount),
+          deposit_name = COALESCE(?, deposit_name),
           deposit_type = COALESCE(?, deposit_type)
         WHERE id = ?`,
       )
@@ -192,6 +196,7 @@ async function guardedRoutes(app: FastifyInstance) {
         b.stockMin ?? null,
         b.depositEnabled == null ? null : b.depositEnabled ? 1 : 0,
         b.depositAmount ?? null,
+        b.depositName ?? null,
         b.depositType ?? null,
         id,
       )
@@ -218,6 +223,7 @@ async function guardedRoutes(app: FastifyInstance) {
       'deposit_default_amount',
       'deposit_auto_print_voucher',
       'deposit_print_redemption_receipt',
+      'deposit_show_on_output_bons',
       'helpers_deposit_enabled',
     ]
     const out: Record<string, string> = {}
@@ -244,6 +250,7 @@ async function guardedRoutes(app: FastifyInstance) {
         depositDefaultAmount: z.number().int().nonnegative().optional(),
         depositAutoPrintVoucher: z.boolean().optional(),
         depositPrintRedemptionReceipt: z.boolean().optional(),
+        depositShowOnOutputBons: z.boolean().optional(),
         helpersDepositEnabled: z.boolean().optional(),
       })
       .parse(req.body ?? {})
@@ -271,6 +278,8 @@ async function guardedRoutes(app: FastifyInstance) {
         'deposit_print_redemption_receipt',
         b.depositPrintRedemptionReceipt ? '1' : '0',
       )
+    if (b.depositShowOnOutputBons !== undefined)
+      stmt.run('deposit_show_on_output_bons', b.depositShowOnOutputBons ? '1' : '0')
     if (b.helpersDepositEnabled !== undefined)
       stmt.run('helpers_deposit_enabled', b.helpersDepositEnabled ? '1' : '0')
 
@@ -997,6 +1006,38 @@ async function guardedRoutes(app: FastifyInstance) {
     }
   })
 
+  app.post('/deposit-redemptions/manual', async (req, reply) => {
+    try {
+      const body = z
+        .object({
+          eventId: z.string().nullable().optional(),
+          quantity: z.number().int().positive(),
+          amountCents: z.number().int().positive(),
+          depositName: z.string().optional(),
+          depositType: z.string().nullable().optional(),
+          note: z.string().optional(),
+        })
+        .parse(req.body ?? {})
+      return createManualDepositRedemption({
+        db: app.sqlite,
+        dataRoot: app.dataRoot,
+        user: req.user,
+        eventId: body.eventId ?? null,
+        quantity: body.quantity,
+        amountCents: body.amountCents,
+        depositName: body.depositName,
+        depositType: body.depositType ?? null,
+        note: body.note,
+      })
+    } catch (e) {
+      const msg = String((e as Error).message)
+      const known = new Set(['INVALID_QUANTITY', 'INVALID_AMOUNT'])
+      return known.has(msg)
+        ? reply.code(400).send({ error: msg })
+        : reply.code(500).send({ error: 'INTERNAL' })
+    }
+  })
+
   app.post('/helper-consumptions', async (req, reply) => {
     try {
       const body = z
@@ -1124,7 +1165,11 @@ async function guardedRoutes(app: FastifyInstance) {
       .prepare(
         `SELECT id, closing_number as closingNumber, day_key as dayKey,
           event_id as eventId,
-          period_start as periodStart, period_end as periodEnd, gross_total_cents as grossTotalCents, created_at as createdAt
+          period_start as periodStart, period_end as periodEnd, gross_total_cents as grossTotalCents,
+          deposit_collected_cents as depositCollectedCents,
+          deposit_paid_out_cents as depositPaidOutCents,
+          deposit_balance_cents as depositBalanceCents,
+          created_at as createdAt
          FROM day_closings ORDER BY created_at DESC LIMIT 180`,
       )
       .all(),

@@ -73,6 +73,27 @@ export async function apiRedeemDepositVoucher(params: {
   })
 }
 
+export async function apiCreateManualDepositRedemption(params: {
+  eventId?: string | null
+  quantity: number
+  amountCents: number
+  depositName?: string
+  depositType?: string | null
+  note?: string
+}) {
+  return apiJson<{
+    id: string
+    mode: 'manual_simple'
+    quantity: number
+    amountCents: number
+    totalCents: number
+    createdAt: number
+  }>('/deposit-redemptions/manual', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
 export async function apiCreateHelperConsumption(params: {
   eventId?: string | null
   note?: string
