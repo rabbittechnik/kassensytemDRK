@@ -17,6 +17,7 @@ import {
 } from '../demo/demoStore'
 import { DemoCodeOverlay } from '../demo/DemoCodeOverlay'
 import { logDemoModeAudit } from '../demo/demoAudit'
+import { IssuerServerSettingsBlock } from './IssuerServerSettings'
 import { DeviceInstallPanel } from '../pwa/DeviceInstallPanel'
 import { InstallAppButton } from '../pwa/InstallAppButton'
 import { IosInstallGuide } from '../pwa/IosInstallGuide'
@@ -500,6 +501,9 @@ function SettingsPanel() {
         value={sumup?.value ?? ''}
         onChange={(e) => void setSetting('sumupNote', e.target.value)}
       />
+
+      <IssuerServerSettingsBlock />
+
       <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4">
         <h3 className="font-semibold text-rose-100">Admin‑PIN ändern</h3>
         <p className="mt-1 text-xs text-rose-200/70">Standard bei Erststart: 1234</p>
