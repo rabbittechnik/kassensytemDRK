@@ -1,4 +1,5 @@
 export type PaymentMethod = 'cash' | 'card' | 'invoice'
+export type DepositType = 'flasche' | 'dose' | 'becher' | 'sonstiges'
 
 /** Zuordnung zu Ausgabestellen für Servier-/Ausgabe-Bons (nicht gleich Produkt-Kategorie). */
 export type ProductOutputGroup =
@@ -53,6 +54,9 @@ export interface ProductRow {
   stockTracking?: boolean
   stockQty?: number | null
   stockMin?: number | null
+  depositEnabled?: boolean
+  depositAmount?: number
+  depositType?: DepositType | null
 }
 
 export type EventStatus = 'planned' | 'active' | 'completed' | 'archived'
@@ -96,6 +100,8 @@ export interface SaleRow {
   servingReceiptPrintCount?: number
   /** z. B. Teamname bei Rechnung (lokal derzeit nur Bar/Karte) */
   invoiceTeamNameSnapshot?: string
+  depositTotalCents?: number
+  depositVoucherNumber?: string | null
 }
 
 /** Server-Verkäufe: Bons clientseitig für Nachdruck (IndexedDB) */
@@ -137,6 +143,43 @@ export interface SaleLineRow {
   qty: number
   unitPriceCents: number
   lineTotalCents: number
+  depositAmountCents?: number
+  depositQty?: number
+  depositTotalCents?: number
+}
+
+export interface HelperRow {
+  id: string
+  name: string
+  team?: string | null
+  role?: string | null
+  active: boolean
+  notes?: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface HelperConsumptionRow {
+  id: string
+  helperGroup: 'Helfer allgemein'
+  consumptionType: 'helper_general'
+  eventId?: string | null
+  saleLikeNumber: string
+  totalValueCents: number
+  paymentTotalCents: number
+  createdAt: number
+  cashier?: string | null
+  note?: string | null
+}
+
+export interface HelperConsumptionItemRow {
+  id: string
+  helperConsumptionId: string
+  productId: string
+  productNameSnapshot: string
+  quantity: number
+  unitPriceSnapshotCents: number
+  totalValueCents: number
 }
 
 /** Architektur-Hooks für spätere Erweiterungen (Mehrere Stände, Nutzer, …) */

@@ -29,6 +29,8 @@ export async function apiCreateSale(params: {
     createdAt: number
     receiptPdfRelPath: string
     duplicate?: boolean
+    depositVoucherNumber?: string
+    depositTotalCents?: number
   }>('/sales', {
     method: 'POST',
     body: JSON.stringify({
@@ -37,5 +39,52 @@ export async function apiCreateSale(params: {
       clientUuid: params.clientUuid,
       eventId: params.eventId,
     }),
+  })
+}
+
+export async function apiGetDepositVoucher(voucherNumber: string) {
+  return apiJson<{
+    id: string
+    voucherNumber: string
+    saleId: string
+    eventId?: string | null
+    amountCents: number
+    quantity: number
+    status: 'open' | 'redeemed' | 'cancelled'
+    issuedAt: number
+    redeemedAt?: number | null
+    redeemedBy?: string | null
+    createdAt: number
+  }>(`/deposit-vouchers/${encodeURIComponent(voucherNumber)}`)
+}
+
+export async function apiRedeemDepositVoucher(params: {
+  voucherNumber: string
+  note?: string
+}) {
+  return apiJson<{
+    voucherNumber: string
+    amountCents: number
+    quantity: number
+    redeemedAt: number
+  }>('/deposit-vouchers/redeem', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  })
+}
+
+export async function apiCreateHelperConsumption(params: {
+  eventId?: string | null
+  note?: string
+  lines: { productId: string; qty: number; unitPriceCents?: number; name?: string }[]
+}) {
+  return apiJson<{
+    id: string
+    saleLikeNumber: string
+    totalValueCents: number
+    createdAt: number
+  }>('/helper-consumptions', {
+    method: 'POST',
+    body: JSON.stringify(params),
   })
 }

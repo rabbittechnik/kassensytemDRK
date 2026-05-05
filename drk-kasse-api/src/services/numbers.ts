@@ -7,6 +7,33 @@ export function nextReceiptNo(db: BetterSqlite3.Database): number {
   return row.m + 1
 }
 
+function nextSettingSeq(db: BetterSqlite3.Database, key: string): number {
+  const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as
+    | { value: string }
+    | undefined
+  const n = row ? Number.parseInt(row.value, 10) || 1 : 1
+  db.prepare(`INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`).run(
+    key,
+    String(n + 1),
+  )
+  return n
+}
+
+export function nextDepositVoucherNo(db: BetterSqlite3.Database, atMs = Date.now()): string {
+  const y = new Date(atMs).getFullYear()
+  const seq = nextSettingSeq(db, `next_deposit_voucher_no_${y}`)
+  return `PF-${y}-${String(seq).padStart(6, '0')}`
+}
+
+export function nextHelperConsumptionNo(
+  db: BetterSqlite3.Database,
+  atMs = Date.now(),
+): string {
+  const y = new Date(atMs).getFullYear()
+  const seq = nextSettingSeq(db, `next_helper_consumption_no_${y}`)
+  return `HV-${y}-${String(seq).padStart(6, '0')}`
+}
+
 /** RE-YYYY-NNNNNN or ST-YYYY-NNNNNN */
 export function nextInvoiceNo(db: BetterSqlite3.Database, kind: 'RE' | 'ST'): string {
   const year = new Date().getFullYear()

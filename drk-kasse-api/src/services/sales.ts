@@ -2,7 +2,11 @@ import crypto from 'node:crypto'
 import type BetterSqlite3 from 'better-sqlite3'
 import type { JwtUser } from '../types.js'
 import { appendAudit } from '../audit.js'
-import { nextReceiptNo } from './numbers.js'
+import {
+  nextDepositVoucherNo,
+  nextHelperConsumptionNo,
+  nextReceiptNo,
+} from './numbers.js'
 import { writeReceiptPdfPromise } from './pdfReceipt.js'
 import {
   getIssuer,
@@ -34,6 +38,13 @@ export interface CartLineBody {
   unitPriceCents: number
 }
 
+export interface HelperConsumptionLineBody {
+  productId: string
+  qty: number
+  unitPriceCents?: number
+  name?: string
+}
+
 function dayKey(ts: number): string {
   const d = new Date(ts)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -54,6 +65,8 @@ export async function createSale(params: {
   createdAt: number
   receiptPdfRelPath: string
   duplicate?: boolean
+  depositVoucherNumber?: string
+  depositTotalCents?: number
 }> {
   const { db, lines, payment, user, clientUuid } = params
   const startedAt = Date.now()
@@ -100,7 +113,8 @@ export async function createSale(params: {
   let totalGuess = lines.reduce((s, l) => s + l.unitPriceCents * l.qty, 0)
   /** Resolve prices from backend products if qty given without prices */
   const prodStmt = db.prepare(
-    `SELECT category_id, name, price_cents, vat_rate_percent, stock_tracking, stock_qty FROM products WHERE id = ?`,
+    `SELECT category_id, name, price_cents, vat_rate_percent, stock_tracking, stock_qty, deposit_enabled, deposit_amount
+     FROM products WHERE id = ?`,
   )
 
   totalGuess = 0
@@ -176,6 +190,8 @@ export async function createSale(params: {
     const tseTxn = `TSE-${receiptNo}`
 
     let sum = 0
+    let depositTotalCents = 0
+    let depositQtyTotal = 0
     type PdfLn = {
       name: string
       qty: number
@@ -185,8 +201,15 @@ export async function createSale(params: {
     const pdfLines: PdfLn[] = []
 
     const lineIns = db.prepare(
-      `INSERT INTO sale_lines (id, sale_id, category_id, product_id, name, qty, unit_price_cents, line_total_cents, vat_rate_percent)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO sale_lines (
+        id, sale_id, category_id, product_id, name, qty, unit_price_cents, line_total_cents, vat_rate_percent,
+        deposit_amount_cents, deposit_qty, deposit_total_cents
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    const voucherIns = db.prepare(
+      `INSERT INTO deposit_vouchers (
+        id, voucher_number, sale_id, event_id, amount_cents, quantity, status, issued_at, redeemed_at, redeemed_by, created_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     )
 
     for (const l of lines) {
@@ -198,6 +221,8 @@ export async function createSale(params: {
             vat_rate_percent: number
             stock_tracking: number
             stock_qty: number | null
+            deposit_enabled: number
+            deposit_amount: number
           }
         | undefined
       const name = (l.name && l.name.trim()) || pr?.name || 'Artikel'
@@ -208,7 +233,12 @@ export async function createSale(params: {
       const categoryId = pr?.category_id ?? 'unknown'
       const vat = pr?.vat_rate_percent ?? 19
       const lineTotal = unitPriceCents * l.qty
+      const depositAmountCents =
+        Number(pr?.deposit_enabled ?? 0) === 1 ? Number(pr?.deposit_amount ?? 0) : 0
+      const lineDepositTotal = depositAmountCents * l.qty
       sum += lineTotal
+      depositTotalCents += lineDepositTotal
+      depositQtyTotal += depositAmountCents > 0 ? l.qty : 0
 
       pdfLines.push({
         name,
@@ -227,6 +257,9 @@ export async function createSale(params: {
         unitPriceCents,
         lineTotal,
         vat,
+        depositAmountCents,
+        depositAmountCents > 0 ? l.qty : 0,
+        lineDepositTotal,
       )
 
       if (pr?.stock_tracking) {
@@ -272,8 +305,8 @@ export async function createSale(params: {
         cashier_user_id, team_id, event_id, invoice_contact_snapshot, cashier_note,
         client_uuid, amount_tendered_cents, change_cents, invoice_state,
         receipt_pdf_rel_path, tse_status, tse_transaction_number, tse_start_time, tse_end_time,
-        tse_process_type, tse_process_data, tax_mode_snapshot, cashier_name_snapshot
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        tse_process_type, tse_process_data, tax_mode_snapshot, cashier_name_snapshot, deposit_total_cents
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     ).run(
       saleId,
       createdAt,
@@ -305,7 +338,27 @@ export async function createSale(params: {
       }),
       taxMode,
       usr?.username ?? null,
+      depositTotalCents,
     )
+
+    let depositVoucherNumber: string | undefined
+    if (depositTotalCents > 0) {
+      const voucherNo = nextDepositVoucherNo(db, createdAt)
+      depositVoucherNumber = voucherNo
+      voucherIns.run(
+        crypto.randomUUID(),
+        voucherNo,
+        saleId,
+        eventId,
+        depositTotalCents,
+        depositQtyTotal,
+        'open',
+        createdAt,
+        null,
+        null,
+        createdAt,
+      )
+    }
 
     appendAudit({
       db,
@@ -333,6 +386,8 @@ export async function createSale(params: {
       receiptNo,
       pdfLines,
       totalCents: sum,
+      depositTotalCents,
+      depositVoucherNumber,
       paymentLabel,
       extraLines,
     }
@@ -371,5 +426,173 @@ export async function createSale(params: {
     receiptNo: built.receiptNo,
     createdAt: built.createdAt,
     receiptPdfRelPath,
+    depositVoucherNumber: built.depositVoucherNumber,
+    depositTotalCents: built.depositTotalCents,
   }
+}
+
+export function getDepositVoucherByNumber(params: {
+  db: BetterSqlite3.Database
+  voucherNumber: string
+}) {
+  const no = params.voucherNumber.trim().toUpperCase()
+  return params.db
+    .prepare(
+      `SELECT id, voucher_number as voucherNumber, sale_id as saleId, event_id as eventId,
+              amount_cents as amountCents, quantity, status, issued_at as issuedAt,
+              redeemed_at as redeemedAt, redeemed_by as redeemedBy, created_at as createdAt
+       FROM deposit_vouchers WHERE voucher_number = ?`,
+    )
+    .get(no)
+}
+
+export function redeemDepositVoucher(params: {
+  db: BetterSqlite3.Database
+  dataRoot: string
+  user: JwtUser
+  voucherNumber: string
+  note?: string
+}) {
+  const no = params.voucherNumber.trim().toUpperCase()
+  const row = params.db
+    .prepare(
+      `SELECT id, voucher_number, amount_cents, quantity, status
+       FROM deposit_vouchers WHERE voucher_number = ?`,
+    )
+    .get(no) as
+    | {
+        id: string
+        voucher_number: string
+        amount_cents: number
+        quantity: number
+        status: 'open' | 'redeemed' | 'cancelled'
+      }
+    | undefined
+  if (!row) throw new Error('DEPOSIT_VOUCHER_NOT_FOUND')
+  if (row.status === 'redeemed') throw new Error('DEPOSIT_VOUCHER_ALREADY_REDEEMED')
+  if (row.status === 'cancelled') throw new Error('DEPOSIT_VOUCHER_CANCELLED')
+
+  const now = Date.now()
+  const tx = params.db.transaction(() => {
+    const changed = params.db
+      .prepare(
+        `UPDATE deposit_vouchers
+         SET status='redeemed', redeemed_at=?, redeemed_by=?
+         WHERE id=? AND status='open'`,
+      )
+      .run(now, params.user.username ?? params.user.sub, row.id)
+    if (changed.changes !== 1) throw new Error('DEPOSIT_VOUCHER_ALREADY_REDEEMED')
+
+    params.db
+      .prepare(
+        `INSERT INTO deposit_redemptions (id, voucher_id, amount_cents, quantity, cashier, redeemed_at, note)
+         VALUES (?,?,?,?,?,?,?)`,
+      )
+      .run(
+        crypto.randomUUID(),
+        row.id,
+        row.amount_cents,
+        row.quantity,
+        params.user.username ?? params.user.sub,
+        now,
+        params.note ?? null,
+      )
+  })
+  tx()
+
+  appendAudit({
+    db: params.db,
+    dataRoot: params.dataRoot,
+    type: 'deposit_redeemed',
+    userId: params.user.sub,
+    payload: { voucherNumber: row.voucher_number, amountCents: row.amount_cents },
+  })
+
+  return {
+    voucherNumber: row.voucher_number,
+    amountCents: row.amount_cents,
+    quantity: row.quantity,
+    redeemedAt: now,
+  }
+}
+
+export function createHelperConsumption(params: {
+  db: BetterSqlite3.Database
+  dataRoot: string
+  user: JwtUser
+  eventId?: string | null
+  note?: string
+  lines: HelperConsumptionLineBody[]
+}) {
+  if (!params.lines.length) throw new Error('EMPTY_CART')
+  const createdAt = Date.now()
+  const id = crypto.randomUUID()
+  const saleLikeNumber = nextHelperConsumptionNo(params.db, createdAt)
+
+  const prod = params.db.prepare(
+    `SELECT name, price_cents, stock_tracking, stock_qty FROM products WHERE id = ?`,
+  )
+  const insParent = params.db.prepare(
+    `INSERT INTO helper_consumptions (
+      id, helper_id, helper_name_snapshot, event_id, sale_like_number, total_value_cents, payment_total_cents,
+      created_at, cashier, note, helper_group, consumption_type
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+  )
+  const insItem = params.db.prepare(
+    `INSERT INTO helper_consumption_items (
+      id, helper_consumption_id, product_id, product_name_snapshot, quantity, unit_price_snapshot_cents, total_value_cents
+    ) VALUES (?,?,?,?,?,?,?)`,
+  )
+  const stockUpd = params.db.prepare(`UPDATE products SET stock_qty = ? WHERE id = ?`)
+
+  let totalValueCents = 0
+  const tx = params.db.transaction(() => {
+    for (const ln of params.lines) {
+      const pr = prod.get(ln.productId) as
+        | { name: string; price_cents: number; stock_tracking: number; stock_qty: number | null }
+        | undefined
+      const unit = ln.unitPriceCents != null ? ln.unitPriceCents : Number(pr?.price_cents ?? 0)
+      const lineTotal = unit * ln.qty
+      totalValueCents += lineTotal
+      insItem.run(
+        crypto.randomUUID(),
+        id,
+        ln.productId,
+        ln.name?.trim() || pr?.name || 'Artikel',
+        ln.qty,
+        unit,
+        lineTotal,
+      )
+      if (Number(pr?.stock_tracking ?? 0) === 1) {
+        const qtyLeft = Number(pr?.stock_qty ?? 0) - ln.qty
+        if (qtyLeft < 0) throw new Error('OUT_OF_STOCK')
+        stockUpd.run(qtyLeft, ln.productId)
+      }
+    }
+    insParent.run(
+      id,
+      null,
+      'Helfer allgemein',
+      params.eventId ?? null,
+      saleLikeNumber,
+      totalValueCents,
+      0,
+      createdAt,
+      params.user.username ?? params.user.sub,
+      params.note ?? null,
+      'Helfer allgemein',
+      'helper_general',
+    )
+  })
+  tx()
+
+  appendAudit({
+    db: params.db,
+    dataRoot: params.dataRoot,
+    type: 'helper_consumption_created',
+    userId: params.user.sub,
+    payload: { id, saleLikeNumber, totalValueCents },
+  })
+
+  return { id, saleLikeNumber, totalValueCents, createdAt }
 }

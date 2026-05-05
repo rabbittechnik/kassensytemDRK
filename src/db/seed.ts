@@ -54,6 +54,30 @@ function defaultProducts(): {
   ]
 }
 
+function defaultDepositForProduct(id: string): {
+  depositEnabled: boolean
+  depositAmount: number
+  depositType: 'flasche' | 'dose' | 'becher' | 'sonstiges' | null
+} {
+  if (
+    [
+      'p-wasser',
+      'p-cola',
+      'p-fanta',
+      'p-spezi',
+      'p-apfelschorle',
+      'p-energy',
+      'p-eistee',
+      'p-limo',
+      'p-orangensaft',
+      'p-bitterlemon',
+    ].includes(id)
+  ) {
+    return { depositEnabled: true, depositAmount: 25, depositType: 'flasche' }
+  }
+  return { depositEnabled: false, depositAmount: 0, depositType: null }
+}
+
 /** Zusätzliche Artikel & DLRG-Branding für bestehende Installationen */
 async function migrateDlrgExtras(): Promise<void> {
   const org = await db.settings.get('orgName')
@@ -80,6 +104,7 @@ async function migrateDlrgExtras(): Promise<void> {
         sortOrder: o,
         active: true,
         outputGroup: defaultOutputGroupForProduct(row.id, row.name),
+        ...defaultDepositForProduct(row.id),
       })
       o += 10
     } else if (!exists.outputGroup) {
@@ -111,6 +136,11 @@ async function ensureBonSettings(): Promise<void> {
     ['printOutputBonKuchen', '1'],
     ['printOutputBonHeiss', '1'],
     ['demoAutoPrintReceipts', '0'],
+    ['deposit_feature_enabled', '1'],
+    ['deposit_default_amount', '25'],
+    ['deposit_auto_print_voucher', '1'],
+    ['deposit_print_redemption_receipt', '0'],
+    ['helpers_deposit_enabled', '0'],
     [
       'receiptTagline',
       'Fuer ECHT. Wenn keiner damit rechnet, sind WIR da.',
@@ -136,6 +166,7 @@ export async function ensureSeed(): Promise<void> {
           ...row,
           active: true,
           outputGroup: defaultOutputGroupForProduct(row.id, row.name),
+          ...defaultDepositForProduct(row.id),
         })
       }
       const hash = await sha256Hex('1234')

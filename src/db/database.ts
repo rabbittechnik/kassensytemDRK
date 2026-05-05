@@ -3,6 +3,9 @@ import type {
   CategoryRow,
   DualReceiptArchiveRow,
   EventRow,
+  HelperConsumptionItemRow,
+  HelperConsumptionRow,
+  HelperRow,
   ProductRow,
   ReceiptReprintLogRow,
   SaleLineRow,
@@ -24,6 +27,9 @@ export class DrkKasseDB extends Dexie {
   dualReceiptArchive!: EntityTable<DualReceiptArchiveRow, 'id'>
   receiptReprintLogs!: EntityTable<ReceiptReprintLogRow, 'id'>
   events!: EntityTable<EventRow, 'id'>
+  helpers!: EntityTable<HelperRow, 'id'>
+  helperConsumptions!: EntityTable<HelperConsumptionRow, 'id'>
+  helperConsumptionItems!: EntityTable<HelperConsumptionItemRow, 'id'>
 
   constructor() {
     super('drk-kasse-v1')
@@ -105,6 +111,34 @@ export class DrkKasseDB extends Dexie {
           await setTbl.put({ key, value: v })
         }
       }
+    })
+    this.version(5).stores({
+      categories: 'id, sortOrder, name',
+      products: 'id, categoryId, active, sortOrder, name, depositEnabled',
+      sales: 'id, dayKey, createdAt, receiptNo, eventId, depositVoucherNumber',
+      saleLines: 'id, saleId, categoryId, productId',
+      settings: 'key',
+      dualReceiptArchive: 'id, serverSaleId, receiptNo, createdAt',
+      receiptReprintLogs: '++id, saleRef, at',
+      events: 'id, status, startDate, endDate, name',
+      helpers: 'id, active, name',
+      helperConsumptions: 'id, helperGroup, consumptionType, eventId, createdAt, saleLikeNumber',
+      helperConsumptionItems: 'id, helperConsumptionId, productId',
+    }).upgrade(async (tx) => {
+      await tx.table<ProductRow, string>('products').toCollection().modify((p) => {
+        if (p.depositEnabled == null) p.depositEnabled = false
+        if (p.depositAmount == null) p.depositAmount = 0
+        if (p.depositType == null) p.depositType = null
+      })
+      await tx.table<SaleRow, string>('sales').toCollection().modify((s) => {
+        if (s.depositTotalCents == null) s.depositTotalCents = 0
+        if (s.depositVoucherNumber == null) s.depositVoucherNumber = null
+      })
+      await tx.table<SaleLineRow, string>('saleLines').toCollection().modify((l) => {
+        if (l.depositAmountCents == null) l.depositAmountCents = 0
+        if (l.depositQty == null) l.depositQty = 0
+        if (l.depositTotalCents == null) l.depositTotalCents = 0
+      })
     })
   }
 }

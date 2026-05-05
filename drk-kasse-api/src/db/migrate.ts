@@ -33,7 +33,10 @@ const MIGRATIONS: string[] = [
     vat_rate_percent INTEGER NOT NULL DEFAULT 19,
     stock_tracking INTEGER NOT NULL DEFAULT 0,
     stock_qty INTEGER,
-    stock_min INTEGER
+    stock_min INTEGER,
+    deposit_enabled INTEGER NOT NULL DEFAULT 0,
+    deposit_amount INTEGER NOT NULL DEFAULT 0,
+    deposit_type TEXT
   );
 
   CREATE INDEX IF NOT EXISTS idx_products_cat ON products(category_id);
@@ -121,6 +124,7 @@ const MIGRATIONS: string[] = [
     tse_process_data TEXT,
     tax_mode_snapshot TEXT,
     cashier_name_snapshot TEXT,
+    deposit_total_cents INTEGER NOT NULL DEFAULT 0,
     UNIQUE (client_uuid)
   );
 
@@ -140,7 +144,10 @@ const MIGRATIONS: string[] = [
     qty INTEGER NOT NULL,
     unit_price_cents INTEGER NOT NULL,
     line_total_cents INTEGER NOT NULL,
-    vat_rate_percent INTEGER NOT NULL DEFAULT 19
+    vat_rate_percent INTEGER NOT NULL DEFAULT 19,
+    deposit_amount_cents INTEGER NOT NULL DEFAULT 0,
+    deposit_qty INTEGER NOT NULL DEFAULT 0,
+    deposit_total_cents INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE INDEX IF NOT EXISTS idx_sale_lines_sale ON sale_lines(sale_id);
@@ -221,6 +228,79 @@ const MIGRATIONS: string[] = [
 
   CREATE INDEX IF NOT EXISTS idx_sale_reprints_sale ON sale_reprints(sale_id);
 
+  CREATE TABLE IF NOT EXISTS deposit_vouchers (
+    id TEXT PRIMARY KEY,
+    voucher_number TEXT NOT NULL UNIQUE,
+    sale_id TEXT NOT NULL REFERENCES sales(id),
+    event_id TEXT REFERENCES events(id),
+    amount_cents INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('open','redeemed','cancelled')) DEFAULT 'open',
+    issued_at INTEGER NOT NULL,
+    redeemed_at INTEGER,
+    redeemed_by TEXT,
+    created_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_deposit_vouchers_sale ON deposit_vouchers(sale_id);
+  CREATE INDEX IF NOT EXISTS idx_deposit_vouchers_status ON deposit_vouchers(status);
+
+  CREATE TABLE IF NOT EXISTS deposit_redemptions (
+    id TEXT PRIMARY KEY,
+    voucher_id TEXT NOT NULL REFERENCES deposit_vouchers(id),
+    amount_cents INTEGER NOT NULL,
+    quantity INTEGER NOT NULL,
+    cashier TEXT,
+    redeemed_at INTEGER NOT NULL,
+    note TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_deposit_redemptions_voucher ON deposit_redemptions(voucher_id);
+
+  CREATE TABLE IF NOT EXISTS helpers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    team TEXT,
+    role TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_helpers_name ON helpers(name);
+  CREATE INDEX IF NOT EXISTS idx_helpers_active ON helpers(active);
+
+  CREATE TABLE IF NOT EXISTS helper_consumptions (
+    id TEXT PRIMARY KEY,
+    helper_id TEXT REFERENCES helpers(id),
+    helper_name_snapshot TEXT NOT NULL,
+    helper_group TEXT NOT NULL DEFAULT 'Helfer allgemein',
+    consumption_type TEXT NOT NULL DEFAULT 'helper_general',
+    event_id TEXT REFERENCES events(id),
+    sale_like_number TEXT NOT NULL UNIQUE,
+    total_value_cents INTEGER NOT NULL,
+    payment_total_cents INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL,
+    cashier TEXT,
+    note TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_helper_consumptions_event ON helper_consumptions(event_id);
+  CREATE INDEX IF NOT EXISTS idx_helper_consumptions_created ON helper_consumptions(created_at);
+
+  CREATE TABLE IF NOT EXISTS helper_consumption_items (
+    id TEXT PRIMARY KEY,
+    helper_consumption_id TEXT NOT NULL REFERENCES helper_consumptions(id),
+    product_id TEXT NOT NULL,
+    product_name_snapshot TEXT NOT NULL,
+    quantity INTEGER NOT NULL,
+    unit_price_snapshot_cents INTEGER NOT NULL,
+    total_value_cents INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_helper_consumption_items_parent ON helper_consumption_items(helper_consumption_id);
+
   CREATE TABLE IF NOT EXISTS day_closings (
     id TEXT PRIMARY KEY,
     closing_number INTEGER NOT NULL UNIQUE,
@@ -268,6 +348,9 @@ export function migrate(db: BetterSqlite3.Database) {
   ensureColumn(db, 'products', 'stock_tracking', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'products', 'stock_qty', 'INTEGER')
   ensureColumn(db, 'products', 'stock_min', 'INTEGER')
+  ensureColumn(db, 'products', 'deposit_enabled', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'products', 'deposit_amount', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'products', 'deposit_type', 'TEXT')
   ensureColumn(db, 'sales', 'tse_start_time', 'INTEGER')
   ensureColumn(db, 'sales', 'tse_end_time', 'INTEGER')
   ensureColumn(db, 'sales', 'tse_signature_counter', 'INTEGER')
@@ -282,10 +365,31 @@ export function migrate(db: BetterSqlite3.Database) {
     "TEXT NOT NULL DEFAULT 'completed' CHECK (lifecycle_status IN ('open', 'completed', 'cancelled', 'refunded', 'closed_day'))",
   )
   ensureColumn(db, 'teams', 'short_name', 'TEXT')
+  ensureColumn(db, 'sales', 'deposit_total_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'sale_lines', 'deposit_amount_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'sale_lines', 'deposit_qty', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'sale_lines', 'deposit_total_cents', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(
+    db,
+    'helper_consumptions',
+    'helper_group',
+    "TEXT NOT NULL DEFAULT 'Helfer allgemein'",
+  )
+  ensureColumn(
+    db,
+    'helper_consumptions',
+    'consumption_type',
+    "TEXT NOT NULL DEFAULT 'helper_general'",
+  )
   migrateEventsSchemaIfNeeded(db)
   ensureColumn(db, 'day_closings', 'event_id', 'TEXT')
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('active_event_id', '')`).run()
   db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('allow_sales_without_event', '1')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_feature_enabled', '1')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_default_amount', '25')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_auto_print_voucher', '1')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('deposit_print_redemption_receipt', '0')`).run()
+  db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('helpers_deposit_enabled', '0')`).run()
 }
 
 /** Erweitert events (Status planned/active/completed/archived, Zeiten, Ort, …). */

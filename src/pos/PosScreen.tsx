@@ -36,7 +36,12 @@ import { CashTenderModal } from './CashTenderModal'
 import { InvoiceSaleModal } from './InvoiceSaleModal'
 import { hasApi } from '../api/config'
 import { apiJson } from '../api/http'
-import { apiCreateSale, type ApiPaymentBody } from '../api/sales'
+import {
+  apiCreateHelperConsumption,
+  apiCreateSale,
+  apiRedeemDepositVoucher,
+  type ApiPaymentBody,
+} from '../api/sales'
 import {
   addDemoSale,
   buildDemoLines,
@@ -89,6 +94,15 @@ function withDemoOutputHeader(text: string): string {
     text.trim(),
     '',
     'DEMO - KEIN ECHTER VERKAUF',
+  ].join('\n')
+}
+
+function withHelperOutputHeader(text: string): string {
+  return [
+    'HELFERVERPFLEGUNG - NICHT KASSIEREN',
+    'GRUPPE: HELFER ALLGEMEIN',
+    '',
+    text.trim(),
   ].join('\n')
 }
 
@@ -200,6 +214,18 @@ export function PosScreen({
                     : row.stock_min == null
                       ? null
                       : Number(row.stock_min),
+                depositEnabled:
+                  typeof row.depositEnabled === 'boolean'
+                    ? row.depositEnabled
+                    : Boolean(Number(row.deposit_enabled ?? 0)),
+                depositAmount:
+                  typeof row.depositAmount === 'number'
+                    ? row.depositAmount
+                    : Number(row.deposit_amount ?? 0),
+                depositType:
+                  row.depositType == null ?
+                    null
+                  : String(row.depositType) as ProductRow['depositType'],
                 imageUrl:
                   row.imageUrl != null ?
                     String(row.imageUrl)
@@ -402,6 +428,9 @@ export function PosScreen({
   const [demoPreviewReceipts, setDemoPreviewReceipts] = useState<DemoPreviewReceiptItem[]>([])
   const [demoPreviewSelectedId, setDemoPreviewSelectedId] = useState<string | null>(null)
   const [syncingOutbox, setSyncingOutbox] = useState(false)
+  const [helperModalOpen, setHelperModalOpen] = useState(false)
+  const [helperNote, setHelperNote] = useState('')
+  const [helperBusy, setHelperBusy] = useState(false)
 
   const total = useMemo(() => cart.reduce((s, l) => s + l.priceCents * l.qty, 0), [cart])
   const saleAvailability = useMemo(
@@ -447,6 +476,128 @@ export function PosScreen({
       setPwaCheckBusy(false)
     }
   }, [checkForUpdate])
+
+  const handleDepositRedeem = useCallback(async () => {
+    if (!remoteMode) {
+      showToast('Pfand-Einlösung ist in Phase 1 nur im API-/Online-Modus erlaubt.', 4200)
+      return
+    }
+    const voucherNumber = window.prompt('Pfandbonnummer eingeben oder scannen (z. B. PF-2026-000124):')
+    if (!voucherNumber?.trim()) return
+    try {
+      const out = await apiRedeemDepositVoucher({ voucherNumber: voucherNumber.trim() })
+      showToast(
+        `Pfand ausgezahlt: ${formatMoney(out.amountCents)} (${out.voucherNumber})`,
+        4200,
+      )
+    } catch (e) {
+      showToast(`Pfand-Einlösung fehlgeschlagen: ${String((e as Error).message ?? e)}`, 5000)
+    }
+  }, [remoteMode])
+
+  const handleHelperConsumption = useCallback(async () => {
+    if (cart.length === 0) {
+      showToast('Warenkorb ist leer.', 2400)
+      return
+    }
+    setHelperModalOpen(true)
+  }, [cart.length])
+
+  const submitHelperConsumption = useCallback(async () => {
+    if (cart.length === 0 || helperBusy) return
+    setHelperBusy(true)
+    try {
+      let bookingNo = ''
+      if (remoteMode) {
+        const out = await apiCreateHelperConsumption({
+          eventId: activeEvent?.id ?? null,
+          note: helperNote.trim() || undefined,
+          lines: cart.map((l) => ({
+            productId: l.productId,
+            qty: l.qty,
+            unitPriceCents: l.priceCents,
+            name: l.name,
+          })),
+        })
+        bookingNo = out.saleLikeNumber
+      } else {
+        const now = Date.now()
+        const year = new Date(now).getFullYear()
+        const seqKey = `nextHelperConsumptionNo_${year}`
+        const current = Number((await getSetting(seqKey)) ?? '1') || 1
+        bookingNo = `HV-${year}-${String(current).padStart(6, '0')}`
+        await db.transaction('rw', db.helperConsumptions, db.helperConsumptionItems, db.products, db.settings, async () => {
+          await db.settings.put({ key: seqKey, value: String(current + 1) })
+          const id = crypto.randomUUID()
+          for (const l of cart) {
+            const p = await db.products.get(l.productId)
+            if (p?.stockTracking) {
+              const left = Number(p.stockQty ?? 0) - l.qty
+              if (left < 0) throw new Error('OUT_OF_STOCK')
+              await db.products.update(l.productId, { stockQty: left })
+            }
+            await db.helperConsumptionItems.add({
+              id: crypto.randomUUID(),
+              helperConsumptionId: id,
+              productId: l.productId,
+              productNameSnapshot: l.name,
+              quantity: l.qty,
+              unitPriceSnapshotCents: l.priceCents,
+              totalValueCents: l.priceCents * l.qty,
+            })
+          }
+          await db.helperConsumptions.add({
+            id,
+            helperGroup: 'Helfer allgemein',
+            consumptionType: 'helper_general',
+            eventId: activeEvent?.id ?? null,
+            saleLikeNumber: bookingNo,
+            totalValueCents: cart.reduce((s, l) => s + l.priceCents * l.qty, 0),
+            paymentTotalCents: 0,
+            createdAt: now,
+            note: helperNote.trim() || null,
+          })
+        })
+      }
+      const linesTotal = cart.reduce((s, l) => s + l.priceCents * l.qty, 0)
+      const modelLines = buildReceiptLineModelsFromCatalog(
+        cart,
+        remoteMode ? remoteProducts : (dexProducts ?? []),
+        remoteMode ? (remoteCategories ?? []) : (dexCategories ?? []),
+      )
+      const ctx = await readReceiptFormattingContext()
+      const outputs = buildOutputReceiptStoredEntries(
+        ctx,
+        modelLines,
+        'cash',
+        0,
+        Date.now(),
+        false,
+      ).map((o) => ({ ...o, text: withHelperOutputHeader(o.text) }))
+      if (outputs.length > 0) {
+        await tryBluetoothPrintPlainBlocks(outputs.map((o) => o.text))
+      }
+      setCart([])
+      setHelperNote('')
+      setHelperModalOpen(false)
+      showToast(`Helferverpflegung erfasst (${bookingNo}).`, 3600)
+      showToast(`Warenwert dokumentiert: ${formatMoney(linesTotal)} · Zu zahlen: 0,00 EUR`, 4200)
+    } catch (e) {
+      showToast(`Helferverpflegung fehlgeschlagen: ${String((e as Error).message ?? e)}`, 5000)
+    } finally {
+      setHelperBusy(false)
+    }
+  }, [
+    activeEvent?.id,
+    cart,
+    helperBusy,
+    helperNote,
+    remoteCategories,
+    remoteMode,
+    remoteProducts,
+    dexProducts,
+    dexCategories,
+  ])
 
   const addProduct = useCallback(
     (productId: string, name: string, priceCents: number) => {
@@ -892,7 +1043,7 @@ export function PosScreen({
     }
   }, [cart, total])
 
-  const modalsBlockKeys = cardOpen || cashOpen || invoiceOpen
+  const modalsBlockKeys = cardOpen || cashOpen || invoiceOpen || helperModalOpen
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1259,6 +1410,23 @@ export function PosScreen({
             <span className="text-xs font-bold text-white/80">Enter</span>
           </button>
         </div>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={() => void handleDepositRedeem()}
+            className="rounded-lg border border-sky-500/50 bg-sky-950/20 px-3 py-2 text-xs font-bold uppercase text-sky-100 hover:bg-sky-950/35"
+          >
+            Pfand auszahlen
+          </button>
+          <button
+            type="button"
+            disabled={cart.length === 0}
+            onClick={() => void handleHelperConsumption()}
+            className="rounded-lg border border-emerald-500/50 bg-emerald-950/20 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/35 disabled:opacity-35"
+          >
+            Helferverpflegung
+          </button>
+        </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 pt-2">
           <div className="flex flex-wrap gap-2">
@@ -1437,6 +1605,49 @@ export function PosScreen({
             setInvoiceOpen(false)
           }}
         />
+      )}
+
+      {helperModalOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+          <div className="panel-glass w-full max-w-lg rounded-2xl border border-emerald-500/50 p-5">
+            <h3 className="text-lg font-black uppercase text-emerald-100">Helferverpflegung buchen</h3>
+            <p className="mt-3 text-sm text-slate-200">
+              Dieser Warenkorb wird als kostenlose Helferverpflegung dokumentiert.
+              Es entsteht kein Umsatz.
+            </p>
+            <p className="mt-3 text-sm text-slate-200">
+              Warenwert: <span className="font-black text-[#FFD700]">{formatMoney(total)}</span><br />
+              Zu zahlen: <span className="font-black text-emerald-200">0,00 EUR</span>
+            </p>
+            <label className="mt-4 block text-xs text-slate-400">Notiz (optional)</label>
+            <textarea
+              className="mt-1 min-h-[80px] w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+              value={helperNote}
+              onChange={(e) => setHelperNote(e.target.value)}
+            />
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={helperBusy}
+                onClick={() => {
+                  setHelperModalOpen(false)
+                  setHelperNote('')
+                }}
+                className="rounded-xl border border-white/20 px-4 py-2 text-sm font-semibold text-slate-300"
+              >
+                Abbrechen
+              </button>
+              <button
+                type="button"
+                disabled={helperBusy}
+                onClick={() => void submitHelperConsumption()}
+                className="rounded-xl border border-emerald-400/60 bg-emerald-700/80 px-4 py-2 text-sm font-black uppercase text-white disabled:opacity-50"
+              >
+                {helperBusy ? 'Buchen…' : 'Helferverpflegung buchen'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {pwaUpdateOfferOpen ? (

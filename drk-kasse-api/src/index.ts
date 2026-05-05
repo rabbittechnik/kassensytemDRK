@@ -13,7 +13,12 @@ import { seedIfNeeded } from './seed.js'
 import { sha256Hex } from './lib/pin.js'
 import type { JwtUser } from './types.js'
 import { appendAudit } from './audit.js'
-import { createSale } from './services/sales.js'
+import {
+  createHelperConsumption,
+  createSale,
+  getDepositVoucherByNumber,
+  redeemDepositVoucher,
+} from './services/sales.js'
 import {
   createBackup,
   createDailyClosing,
@@ -137,7 +142,10 @@ async function guardedRoutes(app: FastifyInstance) {
          vat_rate_percent as vatRatePercent,
          stock_tracking as stockTracking,
          stock_qty as stockQty,
-         stock_min as stockMin
+         stock_min as stockMin,
+         deposit_enabled as depositEnabled,
+         deposit_amount as depositAmount,
+         deposit_type as depositType
        FROM products ORDER BY category_id, sort_order`,
       )
       .all()
@@ -154,6 +162,9 @@ async function guardedRoutes(app: FastifyInstance) {
         stockTracking: z.boolean().optional(),
         stockQty: z.number().int().nullable().optional(),
         stockMin: z.number().int().nullable().optional(),
+        depositEnabled: z.boolean().optional(),
+        depositAmount: z.number().int().nonnegative().optional(),
+        depositType: z.string().nullable().optional(),
       })
       .parse(req.body ?? {})
     const exists = app.sqlite.prepare(`SELECT id FROM products WHERE id = ?`).get(id)
@@ -166,7 +177,10 @@ async function guardedRoutes(app: FastifyInstance) {
           active = COALESCE(?, active),
           stock_tracking = COALESCE(?, stock_tracking),
           stock_qty = COALESCE(?, stock_qty),
-          stock_min = COALESCE(?, stock_min)
+          stock_min = COALESCE(?, stock_min),
+          deposit_enabled = COALESCE(?, deposit_enabled),
+          deposit_amount = COALESCE(?, deposit_amount),
+          deposit_type = COALESCE(?, deposit_type)
         WHERE id = ?`,
       )
       .run(
@@ -176,6 +190,9 @@ async function guardedRoutes(app: FastifyInstance) {
         b.stockTracking == null ? null : b.stockTracking ? 1 : 0,
         b.stockQty ?? null,
         b.stockMin ?? null,
+        b.depositEnabled == null ? null : b.depositEnabled ? 1 : 0,
+        b.depositAmount ?? null,
+        b.depositType ?? null,
         id,
       )
     appendAudit({
@@ -197,6 +214,11 @@ async function guardedRoutes(app: FastifyInstance) {
       'receipt_footer',
       'active_event_id',
       'allow_sales_without_event',
+      'deposit_feature_enabled',
+      'deposit_default_amount',
+      'deposit_auto_print_voucher',
+      'deposit_print_redemption_receipt',
+      'helpers_deposit_enabled',
     ]
     const out: Record<string, string> = {}
     const st = app.sqlite.prepare(`SELECT value FROM settings WHERE key = ?`)
@@ -218,6 +240,11 @@ async function guardedRoutes(app: FastifyInstance) {
         receiptFooter: z.string().optional(),
         activeEventId: z.string().nullable().optional(),
         allowSalesWithoutEvent: z.boolean().optional(),
+        depositFeatureEnabled: z.boolean().optional(),
+        depositDefaultAmount: z.number().int().nonnegative().optional(),
+        depositAutoPrintVoucher: z.boolean().optional(),
+        depositPrintRedemptionReceipt: z.boolean().optional(),
+        helpersDepositEnabled: z.boolean().optional(),
       })
       .parse(req.body ?? {})
 
@@ -233,6 +260,19 @@ async function guardedRoutes(app: FastifyInstance) {
     if (b.activeEventId !== undefined) stmt.run('active_event_id', b.activeEventId ?? '')
     if (b.allowSalesWithoutEvent !== undefined)
       stmt.run('allow_sales_without_event', b.allowSalesWithoutEvent ? '1' : '0')
+    if (b.depositFeatureEnabled !== undefined)
+      stmt.run('deposit_feature_enabled', b.depositFeatureEnabled ? '1' : '0')
+    if (b.depositDefaultAmount !== undefined)
+      stmt.run('deposit_default_amount', String(b.depositDefaultAmount))
+    if (b.depositAutoPrintVoucher !== undefined)
+      stmt.run('deposit_auto_print_voucher', b.depositAutoPrintVoucher ? '1' : '0')
+    if (b.depositPrintRedemptionReceipt !== undefined)
+      stmt.run(
+        'deposit_print_redemption_receipt',
+        b.depositPrintRedemptionReceipt ? '1' : '0',
+      )
+    if (b.helpersDepositEnabled !== undefined)
+      stmt.run('helpers_deposit_enabled', b.helpersDepositEnabled ? '1' : '0')
 
     appendAudit({
       db: app.sqlite,
@@ -916,6 +956,74 @@ async function guardedRoutes(app: FastifyInstance) {
             'Verkauf nicht erlaubt: Keine aktive Veranstaltung und Standardverkauf deaktiviert.',
         })
       }
+      return known.has(msg)
+        ? reply.code(400).send({ error: msg })
+        : reply.code(500).send({ error: 'INTERNAL' })
+    }
+  })
+
+  app.get('/deposit-vouchers/:voucherNumber', async (req, reply) => {
+    const voucherNumber = String((req.params as { voucherNumber: string }).voucherNumber)
+    const row = getDepositVoucherByNumber({ db: app.sqlite, voucherNumber })
+    if (!row) return reply.code(404).send({ error: 'NOT_FOUND' })
+    return row
+  })
+
+  app.post('/deposit-vouchers/redeem', async (req, reply) => {
+    try {
+      const body = z
+        .object({
+          voucherNumber: z.string().min(3),
+          note: z.string().optional(),
+        })
+        .parse(req.body ?? {})
+      return redeemDepositVoucher({
+        db: app.sqlite,
+        dataRoot: app.dataRoot,
+        user: req.user,
+        voucherNumber: body.voucherNumber,
+        note: body.note,
+      })
+    } catch (e) {
+      const msg = String((e as Error).message)
+      const known = new Set([
+        'DEPOSIT_VOUCHER_NOT_FOUND',
+        'DEPOSIT_VOUCHER_ALREADY_REDEEMED',
+        'DEPOSIT_VOUCHER_CANCELLED',
+      ])
+      return known.has(msg)
+        ? reply.code(400).send({ error: msg })
+        : reply.code(500).send({ error: 'INTERNAL' })
+    }
+  })
+
+  app.post('/helper-consumptions', async (req, reply) => {
+    try {
+      const body = z
+        .object({
+          eventId: z.string().nullable().optional(),
+          note: z.string().optional(),
+          lines: z.array(
+            z.object({
+              productId: z.string(),
+              qty: z.number().int().positive(),
+              unitPriceCents: z.number().int().nonnegative().optional(),
+              name: z.string().optional(),
+            }),
+          ),
+        })
+        .parse(req.body ?? {})
+      return createHelperConsumption({
+        db: app.sqlite,
+        dataRoot: app.dataRoot,
+        user: req.user,
+        eventId: body.eventId ?? null,
+        note: body.note,
+        lines: body.lines,
+      })
+    } catch (e) {
+      const msg = String((e as Error).message)
+      const known = new Set(['EMPTY_CART', 'OUT_OF_STOCK'])
       return known.has(msg)
         ? reply.code(400).send({ error: msg })
         : reply.code(500).send({ error: 'INTERNAL' })

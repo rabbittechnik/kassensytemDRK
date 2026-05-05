@@ -6,13 +6,19 @@ import { sha256Hex } from '../lib/pin'
 import { formatMoney } from '../lib/format'
 import { exportSalesCsv } from '../export/exportSales'
 import { exportDemoSalesCsv } from '../export/exportDemo'
-import type { CategoryRow, ProductOutputGroup, ProductRow } from '../types'
+import type { CategoryRow, DepositType, ProductOutputGroup, ProductRow } from '../types'
 
 const OUTPUT_GROUP_OPTIONS: { value: ProductOutputGroup; label: string }[] = [
   { value: 'getraenke', label: 'Getränke' },
   { value: 'kuchen_suess', label: 'Kuchen / Süßes' },
   { value: 'heisses_essen', label: 'Heißes Essen' },
   { value: 'keine_ausgabe', label: 'Keine Ausgabe' },
+]
+const DEPOSIT_TYPE_OPTIONS: { value: DepositType; label: string }[] = [
+  { value: 'flasche', label: 'Flasche' },
+  { value: 'dose', label: 'Dose' },
+  { value: 'becher', label: 'Becher' },
+  { value: 'sonstiges', label: 'Sonstiges' },
 ]
 import { TeamsBilling } from './TeamsBilling'
 import { ReceiptManagePanel } from './ReceiptManagePanel'
@@ -240,11 +246,22 @@ function ProductEditor(props: {
   const [imageUrl, setImageUrl] = useState(
     (existing?.imageUrl ?? '').trim(),
   )
+  const [depositEnabled, setDepositEnabled] = useState(
+    existing?.depositEnabled ?? false,
+  )
+  const [depositAmountStr, setDepositAmountStr] = useState(
+    (((existing?.depositAmount ?? 0) as number) / 100).toFixed(2).replace('.', ','),
+  )
+  const [depositType, setDepositType] = useState<DepositType>(
+    existing?.depositType ?? 'flasche',
+  )
 
   const save = useCallback(async () => {
     const euros = parseFloat(priceStr.replace(',', '.'))
     if (!name.trim() || Number.isNaN(euros) || !categoryId) return
     const priceCents = Math.round(euros * 100)
+    const depEuro = parseFloat(depositAmountStr.replace(',', '.'))
+    const depositAmount = Number.isNaN(depEuro) ? 0 : Math.max(0, Math.round(depEuro * 100))
     if (isNew) {
       const max =
         (await db.products.orderBy('sortOrder').last())?.sortOrder ?? 0
@@ -259,6 +276,9 @@ function ProductEditor(props: {
         ...(imageUrl.trim() ?
           { imageUrl: imageUrl.trim() }
         : {}),
+        depositEnabled,
+        depositAmount,
+        depositType: depositEnabled ? depositType : null,
       })
     } else if (existing) {
       await db.products.update(existing.id, {
@@ -268,6 +288,9 @@ function ProductEditor(props: {
         active,
         outputGroup,
         imageUrl: imageUrl.trim() ? imageUrl.trim() : null,
+        depositEnabled,
+        depositAmount,
+        depositType: depositEnabled ? depositType : null,
       })
     }
     onClose()
@@ -276,6 +299,9 @@ function ProductEditor(props: {
     categoryId,
     existing,
     imageUrl,
+    depositEnabled,
+    depositAmountStr,
+    depositType,
     isNew,
     name,
     outputGroup,
@@ -345,6 +371,35 @@ function ProductEditor(props: {
           />
           Im Verkauf sichtbar
         </label>
+        <label className="mt-2 flex items-center gap-2 text-slate-200">
+          <input
+            type="checkbox"
+            checked={depositEnabled}
+            onChange={(e) => setDepositEnabled(e.target.checked)}
+          />
+          Pfand aktiv
+        </label>
+        <label className="mt-3 block text-sm text-slate-400">Pfandbetrag (EUR)</label>
+        <input
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white disabled:opacity-50"
+          inputMode="decimal"
+          disabled={!depositEnabled}
+          value={depositAmountStr}
+          onChange={(e) => setDepositAmountStr(e.target.value)}
+        />
+        <label className="mt-3 block text-sm text-slate-400">Pfandtyp</label>
+        <select
+          className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-3 text-white disabled:opacity-50"
+          disabled={!depositEnabled}
+          value={depositType}
+          onChange={(e) => setDepositType(e.target.value as DepositType)}
+        >
+          {DEPOSIT_TYPE_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
@@ -584,6 +639,11 @@ function BonSettingsBlock() {
   const pk = useLiveQuery(() => db.settings.where('key').equals('printOutputBonKuchen').first(), [])
   const ph = useLiveQuery(() => db.settings.where('key').equals('printOutputBonHeiss').first(), [])
   const demoAuto = useLiveQuery(() => db.settings.where('key').equals('demoAutoPrintReceipts').first(), [])
+  const depEnabled = useLiveQuery(() => db.settings.where('key').equals('deposit_feature_enabled').first(), [])
+  const depDefault = useLiveQuery(() => db.settings.where('key').equals('deposit_default_amount').first(), [])
+  const depAutoVoucher = useLiveQuery(() => db.settings.where('key').equals('deposit_auto_print_voucher').first(), [])
+  const depPrintRedeem = useLiveQuery(() => db.settings.where('key').equals('deposit_print_redemption_receipt').first(), [])
+  const helpersDeposit = useLiveQuery(() => db.settings.where('key').equals('helpers_deposit_enabled').first(), [])
   const tag = useLiveQuery(() => db.settings.where('key').equals('receiptTagline').first(), [])
   const reg = useLiveQuery(() => db.settings.where('key').equals('registerName').first(), [])
   const cash = useLiveQuery(() => db.settings.where('key').equals('cashierName').first(), [])
@@ -664,6 +724,50 @@ function BonSettingsBlock() {
         />
         Demo-Bons automatisch drucken (sonst nur Vorschau)
       </label>
+      <div className="mt-2 rounded-xl border border-sky-500/30 bg-sky-950/10 p-3">
+        <p className="mb-2 text-xs font-bold uppercase tracking-wide text-sky-200">Pfand-Einstellungen</p>
+        <label className="flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={depEnabled?.value !== '0'}
+            onChange={(e) => void setSetting('deposit_feature_enabled', e.target.checked ? '1' : '0')}
+          />
+          Pfandfunktion aktiv
+        </label>
+        <label className="mt-2 block text-xs text-slate-400">
+          Standardpfand (Cent)
+          <input
+            className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2 text-white"
+            inputMode="numeric"
+            value={depDefault?.value ?? '25'}
+            onChange={(e) => void setSetting('deposit_default_amount', e.target.value.replace(/[^\d]/g, '') || '0')}
+          />
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={depAutoVoucher?.value !== '0'}
+            onChange={(e) => void setSetting('deposit_auto_print_voucher', e.target.checked ? '1' : '0')}
+          />
+          Pfandbon automatisch drucken
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={depPrintRedeem?.value === '1'}
+            onChange={(e) => void setSetting('deposit_print_redemption_receipt', e.target.checked ? '1' : '0')}
+          />
+          Pfandauszahlungsbeleg drucken
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-sm text-slate-300">
+          <input
+            type="checkbox"
+            checked={helpersDeposit?.value === '1'}
+            onChange={(e) => void setSetting('helpers_deposit_enabled', e.target.checked ? '1' : '0')}
+          />
+          Pfand bei Helferverpflegung berechnen
+        </label>
+      </div>
       <label className="block text-xs text-slate-400">
         Bon‑Spruch (optional, Zeilenumbruch möglich)
         <textarea

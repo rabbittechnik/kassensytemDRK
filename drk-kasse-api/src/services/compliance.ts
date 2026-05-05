@@ -115,8 +115,8 @@ export function stornoSale(params: {
           cashier_user_id, team_id, event_id, invoice_contact_snapshot, cashier_note, amount_tendered_cents,
           change_cents, invoice_state, is_stornoed, reverses_sale_id, receipt_pdf_rel_path, tse_status,
           tse_transaction_number, tse_start_time, tse_end_time, tse_process_type, tse_process_data,
-          tax_mode_snapshot, cashier_name_snapshot
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          tax_mode_snapshot, cashier_name_snapshot, deposit_total_cents
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         newSaleId,
@@ -146,11 +146,14 @@ export function stornoSale(params: {
         JSON.stringify({ originalSaleId: params.saleId, reason: params.reason ?? '' }),
         sale.tax_mode_snapshot ?? null,
         params.user.username ?? null,
+        -Math.abs(Number(sale.deposit_total_cents ?? 0)),
       )
 
     const insLine = params.db.prepare(
-      `INSERT INTO sale_lines (id, sale_id, category_id, product_id, name, qty, unit_price_cents, line_total_cents, vat_rate_percent)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO sale_lines (
+        id, sale_id, category_id, product_id, name, qty, unit_price_cents, line_total_cents, vat_rate_percent,
+        deposit_amount_cents, deposit_qty, deposit_total_cents
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
     )
     const updStock = params.db.prepare(`UPDATE products SET stock_qty = COALESCE(stock_qty, 0) + ? WHERE id = ?`)
     for (const ln of lines) {
@@ -166,6 +169,9 @@ export function stornoSale(params: {
         ln.unit_price_cents,
         lineTotal,
         ln.vat_rate_percent ?? 19,
+        ln.deposit_amount_cents ?? 0,
+        -(Math.abs(Number(ln.deposit_qty ?? 0))),
+        -(Math.abs(Number(ln.deposit_total_cents ?? 0))),
       )
       const p = params.db
         .prepare(`SELECT stock_tracking FROM products WHERE id = ?`)
@@ -174,6 +180,13 @@ export function stornoSale(params: {
     }
 
     params.db.prepare(`UPDATE sales SET is_stornoed = 1 WHERE id = ?`).run(params.saleId)
+    params.db
+      .prepare(
+        `UPDATE deposit_vouchers
+         SET status='cancelled'
+         WHERE sale_id = ? AND status = 'open'`,
+      )
+      .run(params.saleId)
   })
   tx()
 
