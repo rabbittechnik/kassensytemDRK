@@ -211,6 +211,14 @@ export default function App() {
                   setRoute('pos')
                   setAdminOk(false)
                 }}
+                onApiLogout={
+                  hasApi()
+                    ? () => {
+                        logOut()
+                        setApiJwt(null)
+                      }
+                    : undefined
+                }
               />
             )}
             {zOpen && <ZReportModal onClose={() => setZOpen(false)} />}
