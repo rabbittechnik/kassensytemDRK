@@ -1,5 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { db } from '../db/database'
 import { setSetting } from '../db/sales'
 import { sha256Hex } from '../lib/pin'
@@ -7,6 +7,8 @@ import { formatMoney } from '../lib/format'
 import { exportSalesCsv } from '../export/exportSales'
 import { exportDemoSalesCsv } from '../export/exportDemo'
 import type { CategoryRow, DepositType, ProductOutputGroup, ProductRow } from '../types'
+import { API_BASE_URL, apiBaseUrl, hasApi, getStoredToken } from '../api/config'
+import { resolveApiUrl, checkServerReachability, describeApiReachability } from '../api/http'
 
 const OUTPUT_GROUP_OPTIONS: { value: ProductOutputGroup; label: string }[] = [
   { value: 'getraenke', label: 'Getränke' },
@@ -47,9 +49,10 @@ const tabs = [
   'Export',
   'Gerät',
   'Einstellungen',
+  'Diagnose',
 ] as const
 
-export function AdminScreen(props: { onBack: () => void }) {
+export function AdminScreen(props: { onBack: () => void; onApiLogout?: () => void }) {
   const [tab, setTab] = useState<(typeof tabs)[number]>('Artikel')
   const demoMode = useDemoMode()
   const [demoCodeOpen, setDemoCodeOpen] = useState(false)
@@ -128,6 +131,7 @@ export function AdminScreen(props: { onBack: () => void }) {
         {tab === 'Export' && <ExportPanel />}
         {tab === 'Gerät' && <DeviceInstallPanel />}
         {tab === 'Einstellungen' && <SettingsPanel />}
+        {tab === 'Diagnose' && <DiagnosePanel onApiLogout={props.onApiLogout} />}
       </div>
 
       {demoCodeOpen && (
@@ -820,6 +824,200 @@ function BonSettingsBlock() {
           onChange={(e) => void setSetting('cashierName', e.target.value)}
         />
       </label>
+    </div>
+  )
+}
+
+function DiagnosePanel(props: { onApiLogout?: () => void }) {
+  const demoMode = useDemoMode()
+  const appMeta = buildMetaSummary()
+  const apiJwt = getStoredToken()
+
+
+  const [apiDiag, setApiDiag] = useState<{
+    baseSet: boolean
+    baseUrl: string
+    healthReachable: boolean
+    apiReachable: boolean
+    depositEndpointReachable: boolean
+    lastCheckedAt: number
+  }>({
+    baseSet: Boolean(String(API_BASE_URL ?? '').trim()),
+    baseUrl: apiBaseUrl(),
+    healthReachable: false,
+    apiReachable: false,
+    depositEndpointReachable: false,
+    lastCheckedAt: 0,
+  })
+  const [checkBusy, setCheckBusy] = useState(false)
+  const [lastCheckResult, setLastCheckResult] = useState<{
+    reachable: boolean
+    requiresAuth: boolean
+    status: number | null
+  } | null>(null)
+
+  const runDiagnostics = useCallback(async () => {
+    const base = apiBaseUrl()
+    const diag = {
+      baseSet: Boolean(base),
+      baseUrl: base,
+      healthReachable: false,
+      apiReachable: false,
+      depositEndpointReachable: false,
+      lastCheckedAt: Date.now(),
+    }
+    if (!diag.baseSet) {
+      setApiDiag(diag)
+      return
+    }
+    setCheckBusy(true)
+    try {
+      const checks = await Promise.allSettled([
+        fetch(resolveApiUrl('/health'), { method: 'GET' }),
+        fetch(base, { method: 'GET' }),
+        fetch(resolveApiUrl('/deposit-vouchers/DIAG-PING-000000'), { method: 'GET' }),
+      ])
+      const okish = (r: PromiseSettledResult<Response>) =>
+        r.status === 'fulfilled' && r.value.status > 0
+      diag.healthReachable = okish(checks[0])
+      diag.apiReachable = okish(checks[1])
+      diag.depositEndpointReachable = okish(checks[2])
+      const healthResult = await checkServerReachability('/health')
+      setLastCheckResult(healthResult)
+    } finally {
+      setApiDiag(diag)
+      setCheckBusy(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void runDiagnostics()
+  }, [runDiagnostics])
+
+  const apiConnected = apiDiag.healthReachable && apiDiag.apiReachable
+  const betriebsmodus = demoMode
+    ? 'Demo'
+    : hasApi() && apiJwt
+      ? 'Online / Server'
+      : 'Offline / Lokal'
+
+  return (
+    <div className="mx-auto max-w-xl space-y-4">
+      <h2 className="text-lg font-semibold text-white">Diagnose</h2>
+      <p className="text-xs text-slate-400">
+        Technische Systeminformationen für Administratoren. Diese Ansicht ist für Helfer nicht relevant.
+      </p>
+
+      <div className="rounded-2xl border border-cyan-500/25 bg-cyan-950/10 p-4 space-y-2">
+        <h3 className="font-semibold text-cyan-100 text-sm uppercase tracking-wide">Betriebsstatus</h3>
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+          <span className="text-slate-400">Betriebsmodus</span>
+          <span className="font-semibold text-white">{betriebsmodus}</span>
+
+          <span className="text-slate-400">API-Status</span>
+          <span className={`font-semibold ${apiConnected ? 'text-emerald-300' : 'text-rose-300'}`}>
+            {apiConnected ? 'verbunden' : 'nicht verbunden'}
+          </span>
+
+          <span className="text-slate-400">Backend-URL</span>
+          <span className="font-mono text-slate-200 break-all">{apiDiag.baseUrl || '/api'}</span>
+
+          <span className="text-slate-400">Health-URL</span>
+          <span className="font-mono text-slate-200 break-all text-xs">{describeApiReachability('/health')}</span>
+
+          <span className="text-slate-400">Login-Status (JWT)</span>
+          <span className={`font-semibold ${apiJwt ? 'text-emerald-300' : 'text-rose-300'}`}>
+            {apiJwt ? 'vorhanden' : 'nicht gesetzt'}
+          </span>
+
+          <span className="text-slate-400">Demo-Modus</span>
+          <span className={`font-semibold ${demoMode ? 'text-amber-300' : 'text-slate-300'}`}>
+            {demoMode ? 'aktiv' : 'inaktiv'}
+          </span>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
+        <h3 className="font-semibold text-slate-200 text-sm uppercase tracking-wide">Diagnosewerte (Health-Check)</h3>
+        <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
+          <span className="text-slate-400">/health</span>
+          <span className={apiDiag.healthReachable ? 'text-emerald-300' : 'text-rose-300'}>
+            {apiDiag.healthReachable ? 'ok' : 'fail'}
+            {lastCheckResult && (
+              <span className="ml-2 text-slate-400 text-xs">
+                (HTTP {lastCheckResult.status ?? 'Netzwerkfehler'}
+                {lastCheckResult.requiresAuth ? ' – Auth erforderlich' : ''})
+              </span>
+            )}
+          </span>
+
+          <span className="text-slate-400">/api</span>
+          <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>
+            {apiDiag.apiReachable ? 'ok' : 'fail'}
+          </span>
+
+          <span className="text-slate-400">Pfand-Endpunkt</span>
+          <span className={apiDiag.depositEndpointReachable ? 'text-emerald-300' : 'text-rose-300'}>
+            {apiDiag.depositEndpointReachable ? 'ok' : 'fail'}
+          </span>
+
+          {apiDiag.lastCheckedAt > 0 && (
+            <>
+              <span className="text-slate-400">Zuletzt geprüft</span>
+              <span className="text-slate-300 text-xs">
+                {new Date(apiDiag.lastCheckedAt).toLocaleTimeString('de-DE')}
+              </span>
+            </>
+          )}
+        </div>
+        <button
+          type="button"
+          disabled={checkBusy}
+          onClick={() => void runDiagnostics()}
+          className="mt-2 rounded-lg border border-cyan-500/50 bg-cyan-950/25 px-3 py-1.5 text-xs font-bold uppercase text-cyan-100 hover:bg-cyan-950/40 disabled:opacity-40"
+        >
+          {checkBusy ? 'Prüfe …' : 'Diagnose erneut ausführen'}
+        </button>
+      </div>
+
+      <div className="rounded-2xl border border-amber-500/20 bg-amber-950/10 p-4 space-y-2">
+        <h3 className="font-semibold text-amber-100 text-sm uppercase tracking-wide">Systemhinweise</h3>
+        <div className="space-y-1 text-sm text-slate-300">
+          <p>
+            <span className="font-semibold text-slate-200">TSE-Status:</span>{' '}
+            <span className="text-slate-400">TSE nicht aktiv – Testbetrieb</span>
+          </p>
+          <p>
+            <span className="font-semibold text-slate-200">Testsystem:</span>{' '}
+            <span className="text-slate-400">
+              Diese Kasse läuft als Testsystem. Belegausgabe bei Bedarf erforderlich.
+            </span>
+          </p>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-2">
+        <h3 className="font-semibold text-slate-200 text-sm uppercase tracking-wide">Build-Info</h3>
+        <p className="font-mono text-[11px] text-slate-400">
+          Version: {appMeta.version} · Build: {appMeta.buildFormatted}
+        </p>
+      </div>
+
+      {props.onApiLogout && (
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 space-y-2">
+          <h3 className="font-semibold text-rose-100 text-sm uppercase tracking-wide">API-Sitzung</h3>
+          <p className="text-xs text-slate-400">
+            Meldet die aktuelle API-Sitzung ab. Die Kasse wechselt danach in den Offline-Modus.
+          </p>
+          <button
+            type="button"
+            onClick={props.onApiLogout}
+            className="rounded-lg border border-rose-500/50 bg-rose-950/30 px-4 py-2 text-sm font-bold uppercase text-rose-100 hover:bg-rose-950/50"
+          >
+            API abmelden
+          </button>
+        </div>
+      )}
     </div>
   )
 }

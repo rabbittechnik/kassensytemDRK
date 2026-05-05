@@ -1364,28 +1364,11 @@ export function PosScreen({
   ])
 
   const revLabel =
-    typeof tagesumsatz === 'number' ? formatMoney(tagesumsatz) : '(API‑Modus)'
+    typeof tagesumsatz === 'number' ? formatMoney(tagesumsatz) : '0,00 €'
   const revHeading = demoMode ? 'DEMO‑Tagesumsatz' : 'Tagesumsatz'
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-black font-bold text-white">
-      {remoteMode && (
-        <div className="flex flex-wrap items-center justify-center gap-3 border-b border-yellow-900/60 bg-yellow-950/40 px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wide text-yellow-200">
-          <span>
-            SERVER‑API aktiv · TESTSYSTEM · TSE inaktiv · Gegeben/Rückgeld bei Bar erforderlich
-          </span>
-          {readOutbox().length > 0 && <span>Offline-Warteschlange: {readOutbox().length}</span>}
-          {onApiLogout && (
-            <button
-              type="button"
-              onClick={() => onApiLogout()}
-              className="rounded border border-yellow-600/50 px-2 py-0.5 text-[10px] font-black text-yellow-100 hover:bg-yellow-900/30"
-            >
-              API abmelden
-            </button>
-          )}
-        </div>
-      )}
       <div
         className={[
           'border-b px-3 py-2.5 text-center text-[13px] font-semibold leading-snug',
