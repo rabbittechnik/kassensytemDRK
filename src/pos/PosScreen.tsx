@@ -159,6 +159,7 @@ export type PosScreenProps = {
   onOpenAdmin: () => void
   onOpenZReport: () => void
   apiJwt?: string | null
+  apiReachable?: boolean
   dataMode?: 'api' | 'offline'
   onActivateOnlineMode?: () => void
   onActivateOfflineMode?: () => void
@@ -169,6 +170,7 @@ export function PosScreen({
   onOpenAdmin,
   onOpenZReport,
   apiJwt,
+  apiReachable = false,
   dataMode = 'offline',
   onActivateOnlineMode,
   onActivateOfflineMode,
@@ -642,6 +644,16 @@ export function PosScreen({
   }, [checkForUpdate])
 
   const handleActivateOnlineMode = useCallback(async () => {
+    // If we already know the server is unreachable, skip the network probe
+    if (!apiReachable) {
+      showToast('Server nicht erreichbar. Bitte Netzwerk und Backend prüfen.', 5000)
+      return
+    }
+    // If server is reachable but no JWT, go to login instead of probing
+    if (!apiJwt) {
+      onOpenAdmin()
+      return
+    }
     setOnlineModeCheckBusy(true)
     setOnlineModeCheckResult(null)
     try {
@@ -652,7 +664,7 @@ export function PosScreen({
         return
       }
       if (result.requiresAuth) {
-        showToast('Server erreichbar – Anmeldung erforderlich. Bitte einloggen.', 5000)
+        onOpenAdmin()
         return
       }
       // Server reachable and no auth issue → switch to online mode
@@ -660,7 +672,7 @@ export function PosScreen({
     } finally {
       setOnlineModeCheckBusy(false)
     }
-  }, [onActivateOnlineMode])
+  }, [apiReachable, apiJwt, onOpenAdmin, onActivateOnlineMode])
 
   const handleCacheRefresh = useCallback(async () => {
     setCacheRefreshBusy(true)
@@ -1812,12 +1824,24 @@ export function PosScreen({
                 {!remoteMode ? (
                   <button
                     type="button"
-                    disabled={onlineModeCheckBusy}
+                    disabled={onlineModeCheckBusy || !apiReachable}
                     onClick={() => void handleActivateOnlineMode()}
                     className="rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/45 disabled:cursor-not-allowed disabled:opacity-35"
-                    title="Server-Erreichbarkeit prüfen und Online-Modus aktivieren"
+                    title={
+                      !apiReachable
+                        ? 'Server nicht erreichbar'
+                        : !apiJwt
+                          ? 'Server erreichbar – Anmeldung erforderlich'
+                          : 'Online-Modus aktivieren'
+                    }
                   >
-                    {onlineModeCheckBusy ? 'Prüfe Server …' : 'Online-Modus aktivieren'}
+                    {onlineModeCheckBusy
+                      ? 'Prüfe Server …'
+                      : !apiReachable
+                        ? 'Server nicht erreichbar'
+                        : !apiJwt
+                          ? 'Jetzt anmelden / Online-Modus aktivieren'
+                          : 'Jetzt Online-Modus verwenden'}
                   </button>
                 ) : (
                   <button
