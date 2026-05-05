@@ -19,6 +19,7 @@ import {
 import type { CartLine, CategoryRow, PaymentMethod, ProductRow } from '../types'
 import type { ReceiptPayload } from '../receipt/escpos'
 import { formatMoney, todayKey } from '../lib/format'
+import { getSaleAvailability } from '../lib/saleAvailability'
 import { receiptAsPlainText } from '../receipt/escpos'
 import type { ReceiptLineModel } from '../receipt/receiptFormat'
 import {
@@ -248,8 +249,11 @@ export function PosScreen({
   const [activeEvent, setActiveEvent] = useState<{
     id: string
     name: string
+    status?: string
     startDate: string
     endDate: string
+    startTime?: string | null
+    endTime?: string | null
   } | null>(null)
   const [allowSalesWithoutEvent, setAllowSalesWithoutEvent] = useState(true)
 
@@ -262,29 +266,37 @@ export function PosScreen({
         setActiveEvent({
           id: 'demo-event',
           name: 'DEMO-Veranstaltung',
+          status: 'active',
           startDate: today,
           endDate: today,
+          startTime: '00:00:00',
+          endTime: '23:59:59',
         })
         setAllowSalesWithoutEvent(true)
         return
       }
       if (remoteMode && apiJwt) {
         try {
-          const ev = await apiJson<Record<string, unknown> | null>('/events/active')
+          const av = await apiJson<{
+            allowStandardSale?: boolean
+            activeEvent?: Record<string, unknown> | null
+          }>('/sales/availability')
           if (!alive) return
+          const ev = av?.activeEvent
           if (ev && typeof ev.id === 'string') {
             setActiveEvent({
               id: String(ev.id),
               name: String(ev.name ?? ''),
+              status: String(ev.status ?? 'active'),
               startDate: String(ev.startDate ?? ''),
               endDate: String(ev.endDate ?? ''),
+              startTime: typeof ev.startTime === 'string' ? ev.startTime : null,
+              endTime: typeof ev.endTime === 'string' ? ev.endTime : null,
             })
           } else {
             setActiveEvent(null)
           }
-          const st = await apiJson<Record<string, string>>('/settings')
-          if (!alive) return
-          setAllowSalesWithoutEvent(st.allow_sales_without_event !== '0')
+          setAllowSalesWithoutEvent(Boolean(av?.allowStandardSale))
         } catch {
           if (!alive) return
           setActiveEvent(null)
@@ -301,8 +313,11 @@ export function PosScreen({
           setActiveEvent({
             id: row.id,
             name: row.name,
+            status: row.status,
             startDate: row.startDate,
             endDate: row.endDate,
+            startTime: row.startTime ?? null,
+            endTime: row.endTime ?? null,
           })
         } else {
           setActiveEvent(null)
@@ -389,6 +404,26 @@ export function PosScreen({
   const [syncingOutbox, setSyncingOutbox] = useState(false)
 
   const total = useMemo(() => cart.reduce((s, l) => s + l.priceCents * l.qty, 0), [cart])
+  const saleAvailability = useMemo(
+    () =>
+      getSaleAvailability({
+        allowStandardSale: allowSalesWithoutEvent,
+        activeEvent,
+        nowMs: now.getTime(),
+      }),
+    [allowSalesWithoutEvent, activeEvent, now],
+  )
+
+  const saleBlockedText = useMemo(() => {
+    if (saleAvailability.canSell) return null
+    if (saleAvailability.reason === 'event_not_started') {
+      return 'Verkauf gesperrt: Die ausgewählte Veranstaltung ist noch nicht gestartet.'
+    }
+    if (saleAvailability.reason === 'event_ended') {
+      return 'Verkauf gesperrt: Die Veranstaltung ist bereits beendet.'
+    }
+    return 'Verkauf gesperrt: Es ist keine aktive Veranstaltung angelegt.'
+  }, [saleAvailability])
 
   function showToast(msg: string, ms = 2800) {
     setToast(msg)
@@ -415,6 +450,14 @@ export function PosScreen({
 
   const addProduct = useCallback(
     (productId: string, name: string, priceCents: number) => {
+      if (!saleAvailability.canSell) {
+        showToast(
+          saleBlockedText ??
+            'Verkauf gesperrt: Keine aktive Veranstaltung ausgewählt.',
+          3600,
+        )
+        return
+      }
       pushPast()
       setTapId(productId)
       window.setTimeout(() => setTapId(null), 400)
@@ -430,7 +473,7 @@ export function PosScreen({
         return [...prev, { key: productId, productId, name, priceCents, qty: 1 }]
       })
     },
-    [pushPast],
+    [pushPast, saleAvailability.canSell, saleBlockedText],
   )
 
   const setQty = useCallback(
@@ -478,6 +521,13 @@ export function PosScreen({
         note?: string
       },
     ) => {
+      if (!saleAvailability.canSell) {
+        showToast(
+          'Verkauf kann nicht abgeschlossen werden, da keine aktive Veranstaltung ausgewählt ist.',
+          4500,
+        )
+        return
+      }
       if (cart.length === 0 || total <= 0) return
       const snap = [...cart]
 
@@ -751,6 +801,7 @@ export function PosScreen({
       dexCategories,
       dexProducts,
       activeEvent,
+      saleAvailability.canSell,
     ],
   )
 
@@ -858,17 +909,17 @@ export function PosScreen({
 
       if (e.key === 'F12') {
         e.preventDefault()
-        if (cart.length === 0 || printBusy) return
+        if (!saleAvailability.canSell || cart.length === 0 || printBusy) return
         openCashModal('withBon')
       } else if (e.key === 'F11') {
         e.preventDefault()
-        if (cart.length > 0) setCardOpen(true)
+        if (saleAvailability.canSell && cart.length > 0) setCardOpen(true)
       } else if (e.key === 'F10') {
         e.preventDefault()
         if (cart.length > 0 && !printBusy) void handlePrintDraft()
       } else if (e.key === 'Enter') {
         e.preventDefault()
-        if (cart.length === 0) return
+        if (!saleAvailability.canSell || cart.length === 0) return
         openCashModal('noBon')
       }
     }
@@ -878,6 +929,7 @@ export function PosScreen({
     modalsBlockKeys,
     cart.length,
     printBusy,
+    saleAvailability.canSell,
     remoteMode,
     openCashModal,
     handlePrintDraft,
@@ -910,14 +962,14 @@ export function PosScreen({
       <div
         className={[
           'border-b px-3 py-2.5 text-center text-[13px] font-semibold leading-snug',
-          activeEvent
+          saleAvailability.canSell && saleAvailability.mode === 'event'
             ? 'border-emerald-500/40 bg-emerald-950/35 text-emerald-50'
-            : allowSalesWithoutEvent
+            : saleAvailability.canSell
               ? 'border-amber-500/40 bg-amber-950/35 text-amber-100'
               : 'border-rose-500/50 bg-rose-950/40 text-rose-100',
         ].join(' ')}
       >
-        {activeEvent ? (
+        {saleAvailability.canSell && saleAvailability.mode === 'event' && activeEvent ? (
           <>
             Aktive Veranstaltung:{' '}
             <span className="font-black">{activeEvent.name}</span>
@@ -930,15 +982,15 @@ export function PosScreen({
               locale: de,
             })}
           </>
-        ) : allowSalesWithoutEvent ? (
+        ) : saleAvailability.canSell ? (
           <>
-            Keine aktive Veranstaltung ausgewählt – Sie können im Standardmodus verkaufen (oder im
-            Admin eine Veranstaltung aktivieren).
+            Standardverkauf aktiv – keine Veranstaltung zugeordnet.
           </>
         ) : (
           <>
-            Keine aktive Veranstaltung – Verkauf ist erst möglich, wenn im Admin eine Veranstaltung
-            aktiv ist oder der Standardmodus ohne Veranstaltung erlaubt wird.
+            <span className="font-black uppercase">Verkauf gesperrt.</span>{' '}
+            {saleBlockedText}{' '}
+            Bitte Veranstaltung aktivieren oder Standardverkauf in den Einstellungen erlauben.
           </>
         )}
       </div>
@@ -1016,12 +1068,12 @@ export function PosScreen({
                   <button
                     key={p.id}
                     type="button"
-                    disabled={soldOut}
+                    disabled={soldOut || !saleAvailability.canSell}
                     onClick={() => addProduct(p.id, p.name, p.priceCents)}
                     className={[
                       'flex h-[5.85rem] w-full shrink-0 items-stretch overflow-hidden rounded-xl border-2 border-[#ff003c] bg-black text-left transition-transform active:scale-[0.98] sm:h-[6.35rem]',
                       'shadow-[0_0_22px_rgba(255,0,60,0.35)] hover:shadow-[0_0_32px_rgba(255,0,60,0.5)]',
-                      soldOut ? 'opacity-50 grayscale' : '',
+                      soldOut || !saleAvailability.canSell ? 'opacity-50 grayscale' : '',
                       tapId === p.id ? 'animate-tap' : '',
                     ].join(' ')}
                   >
@@ -1162,7 +1214,7 @@ export function PosScreen({
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
           <button
             type="button"
-            disabled={cart.length === 0 || printBusy}
+            disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
             onClick={() => openCashModal('withBon')}
             className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-[#ff003c] bg-red-950/30 px-4 py-2 text-lg font-black uppercase text-white shadow-[0_0_24px_rgba(255,0,60,0.25)] transition enabled:hover:bg-red-950/50 disabled:opacity-35"
           >
@@ -1171,7 +1223,7 @@ export function PosScreen({
           </button>
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => setCardOpen(true)}
             className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-[#FFD700] bg-black px-4 py-2 text-lg font-black uppercase text-[#FFD700] shadow-[0_0_20px_rgba(255,215,0,0.15)] transition enabled:hover:bg-neutral-950 disabled:opacity-35"
           >
@@ -1180,7 +1232,7 @@ export function PosScreen({
           </button>
           <button
             type="button"
-            disabled={cart.length === 0 || (!remoteMode && !demoMode)}
+            disabled={!saleAvailability.canSell || cart.length === 0 || (!remoteMode && !demoMode)}
             onClick={() => setInvoiceOpen(true)}
             title={!remoteMode && !demoMode ? 'Erfordert API + Login' : ''}
             className="flex min-h-[64px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-black px-4 py-2 text-lg font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-neutral-950 disabled:opacity-35"
@@ -1198,7 +1250,7 @@ export function PosScreen({
           </button>
           <button
             type="button"
-            disabled={cart.length === 0}
+            disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => openCashModal('noBon')}
             className="flex min-h-[72px] flex-col items-center justify-center rounded-xl border-2 border-[#FFD700] bg-gradient-to-b from-[#8a7500]/40 to-black px-4 py-2 text-xl font-black uppercase text-[#FFD700] shadow-[0_0_28px_rgba(255,215,0,0.35)] transition enabled:hover:brightness-110 disabled:opacity-35"
           >

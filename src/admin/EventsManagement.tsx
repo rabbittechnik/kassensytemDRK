@@ -231,8 +231,11 @@ export function EventsManagement() {
           checked={allowNoEvent}
           onChange={(e) => void saveAllowNoEvent(e.target.checked)}
         />
-        Verkauf ohne Veranstaltung erlauben (Standardmodus, wenn keine aktiv)
+        Standardverkauf ohne Veranstaltung erlauben
       </label>
+      <p className="text-xs text-slate-500">
+        Wenn deaktiviert, können Verkäufe nur während einer aktiven Veranstaltung abgeschlossen werden.
+      </p>
 
       <input
         type="search"

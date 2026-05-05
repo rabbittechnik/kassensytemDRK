@@ -31,6 +31,7 @@ import {
   sendInvoiceEmail,
   stornoInvoice,
 } from './services/invoices.js'
+import { getSaleAvailability } from './services/saleAvailability.js'
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -581,11 +582,8 @@ async function guardedRoutes(app: FastifyInstance) {
   )
 
   app.get('/events/active', async () => {
-    const row = app.sqlite
-      .prepare(`SELECT value FROM settings WHERE key = 'active_event_id'`)
-      .get() as { value: string } | undefined
-    const id = row?.value?.trim()
-    if (!id) return null
+    const availability = getSaleAvailability({ db: app.sqlite })
+    if (availability.mode !== 'event' || !availability.activeEvent) return null
     const ev = app.sqlite
       .prepare(
         `SELECT id, name,
@@ -595,8 +593,30 @@ async function guardedRoutes(app: FastifyInstance) {
            status, created_at AS createdAt, updated_at AS updatedAt, closed_at AS closedAt
          FROM events WHERE id = ?`,
       )
-      .get(id) as Record<string, unknown> | undefined
+      .get(availability.activeEvent.id) as Record<string, unknown> | undefined
     return ev ?? null
+  })
+
+  app.get('/sales/availability', async () => {
+    const a = getSaleAvailability({ db: app.sqlite })
+    return {
+      canSell: a.canSell,
+      mode: a.mode,
+      reason: a.reason,
+      allowStandardSale: a.allowStandardSale,
+      activeEvent:
+        a.activeEvent ?
+          {
+            id: a.activeEvent.id,
+            name: a.activeEvent.name,
+            status: a.activeEvent.status,
+            startDate: a.activeEvent.start_date,
+            endDate: a.activeEvent.end_date,
+            startTime: a.activeEvent.start_time,
+            endTime: a.activeEvent.end_time,
+          }
+        : null,
+    }
   })
 
   app.post('/events', async (req, reply) => {
@@ -885,8 +905,17 @@ async function guardedRoutes(app: FastifyInstance) {
         'INVALID_EVENT',
         'NO_EVENT',
         'EVENT_NOT_ACTIVE',
+        'EVENT_NOT_STARTED',
+        'EVENT_ENDED',
       ])
 
+      if (msg === 'NO_SALE_PERMISSION') {
+        return reply.code(403).send({
+          error: msg,
+          message:
+            'Verkauf nicht erlaubt: Keine aktive Veranstaltung und Standardverkauf deaktiviert.',
+        })
+      }
       return known.has(msg)
         ? reply.code(400).send({ error: msg })
         : reply.code(500).send({ error: 'INTERNAL' })
