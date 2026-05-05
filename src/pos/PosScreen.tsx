@@ -35,7 +35,7 @@ import { ProductVisual } from './productVisual'
 import { CashTenderModal } from './CashTenderModal'
 import { InvoiceSaleModal } from './InvoiceSaleModal'
 import { API_BASE_URL, apiBaseUrl, hasApi } from '../api/config'
-import { apiJson, resolveApiUrl } from '../api/http'
+import { apiJson, resolveApiUrl, checkServerReachability, describeApiReachability } from '../api/http'
 import {
   apiCreateManualDepositRedemption,
   apiCreateHelperConsumption,
@@ -60,6 +60,7 @@ import { logDemoModeAudit } from '../demo/demoAudit'
 import { InstallAppButton } from '../pwa/InstallAppButton'
 import { IosInstallGuide } from '../pwa/IosInstallGuide'
 import { usePwaUpdate } from '../pwa/PwaUpdateProvider'
+import { buildMetaSummary } from '../lib/buildMeta'
 import {
   ReceiptPreviewModal,
   type DemoPreviewReceiptItem,
@@ -439,6 +440,14 @@ export function PosScreen({
   const [toast, setToast] = useState<string | null>(null)
   const [printBusy, setPrintBusy] = useState(false)
   const [pwaCheckBusy, setPwaCheckBusy] = useState(false)
+  const [cacheRefreshBusy, setCacheRefreshBusy] = useState(false)
+  const [onlineModeCheckBusy, setOnlineModeCheckBusy] = useState(false)
+  const [onlineModeCheckResult, setOnlineModeCheckResult] = useState<{
+    reachable: boolean
+    requiresAuth: boolean
+    status: number | null
+  } | null>(null)
+  const [diagPanelOpen, setDiagPanelOpen] = useState(false)
   const [pwaUpdateOfferOpen, setPwaUpdateOfferOpen] = useState(false)
   const [demoPreviewOpen, setDemoPreviewOpen] = useState(false)
   const [demoPreviewReceipts, setDemoPreviewReceipts] = useState<DemoPreviewReceiptItem[]>([])
@@ -631,6 +640,49 @@ export function PosScreen({
       setPwaCheckBusy(false)
     }
   }, [checkForUpdate])
+
+  const handleActivateOnlineMode = useCallback(async () => {
+    setOnlineModeCheckBusy(true)
+    setOnlineModeCheckResult(null)
+    try {
+      const result = await checkServerReachability('/health')
+      setOnlineModeCheckResult(result)
+      if (!result.reachable && !result.requiresAuth) {
+        showToast('Server nicht erreichbar. Bitte Netzwerk und Backend prüfen.', 5000)
+        return
+      }
+      if (result.requiresAuth) {
+        showToast('Server erreichbar – Anmeldung erforderlich. Bitte einloggen.', 5000)
+        return
+      }
+      // Server reachable and no auth issue → switch to online mode
+      onActivateOnlineMode?.()
+    } finally {
+      setOnlineModeCheckBusy(false)
+    }
+  }, [onActivateOnlineMode])
+
+  const handleCacheRefresh = useCallback(async () => {
+    setCacheRefreshBusy(true)
+    try {
+      if ('serviceWorker' in navigator) {
+        const registrations = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(
+          registrations.map(async (reg) => {
+            await reg.update()
+            if (reg.waiting) {
+              reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+            }
+          }),
+        )
+      }
+      showToast('Cache wird aktualisiert – Seite lädt neu …', 2000)
+      window.setTimeout(() => window.location.reload(), 2200)
+    } catch {
+      showToast('Cache-Aktualisierung fehlgeschlagen.', 3500)
+      setCacheRefreshBusy(false)
+    }
+  }, [])
 
   const handleDepositRedeem = useCallback(async () => {
     if (!demoMode) {
@@ -1711,36 +1763,61 @@ export function PosScreen({
           </div>
           <div className="flex flex-wrap gap-2">
             <div className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
-              Betriebsmodus:{' '}
-              <span className="font-black text-white">{modeLabel}</span>
-              {' · '}API-Status:{' '}
-              <span className="font-black text-white">{apiConnected ? 'verbunden' : 'nicht verbunden'}</span>
-              {' · '}Backend-URL:{' '}
-              <span className="font-mono normal-case text-slate-200">{apiDiag.baseUrl || '/api'}</span>
-              <div className="mt-1 normal-case text-[10px] text-slate-400">
-                Checks: API_BASE_URL {apiDiag.baseSet ? 'gesetzt' : 'leer'} · /health{' '}
-                {apiDiag.healthReachable ? 'ok' : 'fail'} · /api {apiDiag.apiReachable ? 'ok' : 'fail'} ·
-                Pfand-Endpunkt {apiDiag.depositEndpointReachable ? 'ok' : 'fail'} · Offline-Modus{' '}
-                {!apiJwt ? 'ja' : 'nein'} · Demo {demoMode ? 'ja' : 'nein'}
-              </div>
+              <button
+                type="button"
+                className="mb-1 font-black text-slate-300 hover:text-white"
+                onClick={() => setDiagPanelOpen((v) => !v)}
+                title="API-Diagnose ein-/ausblenden"
+              >
+                Betriebsmodus:{' '}
+                <span className="font-black text-white">{modeLabel}</span>
+                {' · '}API-Status:{' '}
+                <span className={`font-black ${apiConnected ? 'text-emerald-300' : 'text-rose-300'}`}>
+                  {apiConnected ? 'verbunden' : 'nicht verbunden'}
+                </span>
+                {' · '}Backend-URL:{' '}
+                <span className="font-mono normal-case text-slate-200">{apiDiag.baseUrl || '/api'}</span>
+                {' '}▾
+              </button>
+              {diagPanelOpen && (() => {
+                const { version, buildFormatted } = buildMetaSummary()
+                return (
+                  <div className="mt-1 space-y-0.5 normal-case text-[10px] text-slate-400">
+                    <div>API_BASE_URL: <span className="font-mono text-slate-200">{apiDiag.baseUrl || '/api'}</span></div>
+                    <div>Health-URL: <span className="font-mono text-slate-200">{describeApiReachability('/health')}</span></div>
+                    <div>
+                      /health:{' '}
+                      <span className={apiDiag.healthReachable ? 'text-emerald-300' : 'text-rose-300'}>
+                        {apiDiag.healthReachable ? 'ok' : 'fail'}
+                      </span>
+                      {onlineModeCheckResult && (
+                        <span className="ml-1 text-slate-400">
+                          (letzter Check: HTTP {onlineModeCheckResult.status ?? 'Netzwerkfehler'}
+                          {onlineModeCheckResult.requiresAuth ? ' – Auth erforderlich' : ''})
+                        </span>
+                      )}
+                    </div>
+                    <div>/api: <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>{apiDiag.apiReachable ? 'ok' : 'fail'}</span></div>
+                    <div>Pfand-Endpunkt: <span className={apiDiag.depositEndpointReachable ? 'text-emerald-300' : 'text-rose-300'}>{apiDiag.depositEndpointReachable ? 'ok' : 'fail'}</span></div>
+                    <div>JWT: <span className={apiJwt ? 'text-emerald-300' : 'text-rose-300'}>{apiJwt ? 'vorhanden' : 'nicht gesetzt'}</span></div>
+                    <div>Modus (bevorzugt / aktiv): <span className="text-slate-200">{remoteMode ? 'api' : 'offline'} / {dataMode}</span></div>
+                    <div>Demo: <span className="text-slate-200">{demoMode ? 'ja' : 'nein'}</span></div>
+                    <div>Version: <span className="text-slate-200">{version}</span> · Build: <span className="text-slate-200">{buildFormatted}</span></div>
+                  </div>
+                )
+              })()}
             </div>
             {!demoMode && (
               <>
                 {!remoteMode ? (
                   <button
                     type="button"
-                    disabled={!apiConnected || !apiJwt}
-                    onClick={() => onActivateOnlineMode?.()}
+                    disabled={onlineModeCheckBusy}
+                    onClick={() => void handleActivateOnlineMode()}
                     className="rounded-lg border border-emerald-500/50 bg-emerald-950/30 px-3 py-2 text-xs font-bold uppercase text-emerald-100 hover:bg-emerald-950/45 disabled:cursor-not-allowed disabled:opacity-35"
-                    title={
-                      apiConnected
-                        ? 'Auf Online-/Servermodus wechseln.'
-                        : 'Online-Modus nicht möglich – Server nicht erreichbar'
-                    }
+                    title="Server-Erreichbarkeit prüfen und Online-Modus aktivieren"
                   >
-                    {apiConnected && apiJwt
-                      ? 'Jetzt Online-Modus verwenden'
-                      : 'Online-Modus nicht möglich – Server nicht erreichbar'}
+                    {onlineModeCheckBusy ? 'Prüfe Server …' : 'Online-Modus aktivieren'}
                   </button>
                 ) : (
                   <button
@@ -1794,6 +1871,16 @@ export function PosScreen({
             >
               <RefreshIcon className={pwaCheckBusy ? 'animate-spin' : ''} />
               {pwaCheckBusy ? 'Prüfe…' : 'Update prüfen'}
+            </button>
+            <button
+              type="button"
+              disabled={cacheRefreshBusy}
+              onClick={() => void handleCacheRefresh()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-sky-500/50 bg-sky-950/20 px-3 py-2 text-xs font-bold uppercase text-sky-200 hover:bg-sky-950/35 disabled:opacity-40"
+              title="Service-Worker-Cache leeren und Seite neu laden"
+            >
+              <RefreshIcon className={cacheRefreshBusy ? 'animate-spin' : ''} />
+              {cacheRefreshBusy ? 'Aktualisiere…' : 'Cache aktualisieren'}
             </button>
             <button
               type="button"
