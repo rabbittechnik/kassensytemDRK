@@ -20,6 +20,7 @@ RUN npm run build
 FROM node:22-bookworm-slim AS api-builder
 WORKDIR /app
 COPY drk-kasse-api/package.json drk-kasse-api/package-lock.json ./
+RUN node --input-type=module -e "import fs from 'node:fs'; const lock=JSON.parse(fs.readFileSync('package-lock.json','utf8')); const ajv=lock.packages?.['node_modules/ajv']?.version; const jst=lock.packages?.['node_modules/json-schema-traverse']?.version; console.log('DEBUG api-lock ajv=', ajv ?? 'missing'); console.log('DEBUG api-lock json-schema-traverse=', jst ?? 'missing');"
 RUN npm ci
 COPY drk-kasse-api/tsconfig.json ./
 COPY drk-kasse-api/src ./src
