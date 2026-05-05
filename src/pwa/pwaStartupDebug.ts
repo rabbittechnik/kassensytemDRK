@@ -107,15 +107,29 @@ export function redirectStandaloneAwayFromApiMount(): boolean {
   return true
 }
 
-/** Wenn die dokumenteigene Antwort eine JSON-Fehlerhülle ist (z. B. 403), auf `/` gehen. */
+/** Wenn die dokumenteigene Antwort eine JSON-Fehlerhülle ist (z. B. 403), auf `/` gehen. */
 export function redirectStandaloneIfJsonErrorShell(): boolean {
   if (typeof window === 'undefined') return false
   const standalone =
     window.matchMedia?.('(display-mode: standalone)')?.matches ??
     Boolean((window.navigator as Navigator & { standalone?: boolean }).standalone)
   const raw = (document.body?.textContent ?? '').trim()
-  if (!standalone || raw.length === 0 || raw.length > 500) return false
-  if (!raw.startsWith('{') || !raw.includes('"statusCode"')) return false
+  if (!standalone || raw.length === 0 || raw.length > 2000) return false
+
+  // JSON error shell (e.g. {"statusCode":403,"error":"Forbidden"})
+  const isJsonError =
+    raw.startsWith('{') &&
+    (raw.includes('"statusCode"') ||
+      raw.includes('"error"') ||
+      raw.includes('"message"'))
+
+  // Plain-text HTTP error responses (e.g. "Forbidden", "Not Found", "Error Forbidden")
+  const isPlainTextError =
+    !raw.startsWith('<') &&
+    /\b(forbidden|unauthorized|not found|error|403|401|404)\b/i.test(raw)
+
+  if (!isJsonError && !isPlainTextError) return false
+
   try {
     sessionStorage.setItem(
       'drk-kasse-json-shell-from',

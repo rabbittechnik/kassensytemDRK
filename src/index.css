@@ -52,29 +52,45 @@ body {
   min-width: 0;
 }
 
+/* On very wide screens, cap the POS layout so it doesn't stretch uncomfortably */
+@media (min-width: 1600px) {
+  .pos-screen-root {
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
 .pos-main-grid {
   grid-template-columns: 1fr;
 }
 
+/* Landscape tablets and small desktops: side-by-side product grid + cart */
 @media (max-width: 1180px) and (orientation: landscape) {
   .pos-main-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
   }
 }
 
 @media (min-width: 1181px) {
   .pos-main-grid {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+    grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
   }
 }
 
 .pos-product-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+@media (min-width: 768px) {
+  .pos-product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
 }
 
 @media (min-width: 1181px) {
   .pos-product-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   }
 }
 
@@ -100,6 +116,20 @@ body {
 @media (min-width: 1181px) {
   .checkout-pos-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Footer checkout area: stack vertically, allow scrolling on small screens */
+.pos-checkout-footer {
+  flex-direction: column;
+  overflow-y: auto;
+  max-height: 45vh;
+}
+
+@media (min-width: 1181px) {
+  .pos-checkout-footer {
+    max-height: none;
+    overflow-y: visible;
   }
 }
 
