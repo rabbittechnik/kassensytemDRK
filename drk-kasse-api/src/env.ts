@@ -20,6 +20,8 @@ export function loadEnv() {
   return {
     port: parseInt(process.env.PORT ?? '8787', 10),
     dataRoot,
+    /** Relativ zum Arbeitsverzeichnis; leer = kein SPA (nur API). */
+    spaRoot: (process.env.SPA_ROOT ?? '').trim(),
     apiMountPath: normalizeApiMountPath(process.env.API_MOUNT_PATH),
     jwtSecret: req('JWT_SECRET', 'dev-insecure-change-me'),
     corsOrigin:

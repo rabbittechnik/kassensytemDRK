@@ -1,3 +1,4 @@
+# Nur Backend (kein SPA). Full-Stack mit /health + /api + statische UI: ../Dockerfile im Monorepo-Wurzelverzeichnis nutzen.
 FROM node:22-bookworm-slim
 
 WORKDIR /app

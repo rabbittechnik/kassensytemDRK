@@ -76,7 +76,12 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,svg,png,woff2,webmanifest}'],
         // Cache nur App-Shell; API/Health/DATA nie aus SW-Cache bedienen.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/health$/, /^\/DATA(\/|$)/],
+        navigateFallbackDenylist: [
+          /^\/api\//,
+          /^\/health$/,
+          /^\/webhook(\/|$)/,
+          /^\/DATA(\/|$)/,
+        ],
         clientsClaim: true,
         skipWaiting: false,
         runtimeCaching: [
@@ -87,6 +92,8 @@ export default defineConfig({
               return (
                 p.startsWith('/api/') ||
                 p === '/health' ||
+                p === '/webhook' ||
+                p.startsWith('/webhook/') ||
                 p === '/DATA' ||
                 p.startsWith('/DATA/')
               )

@@ -38,6 +38,7 @@ import {
   stornoInvoice,
 } from './services/invoices.js'
 import { getSaleAvailability } from './services/saleAvailability.js'
+import { registerSpaAssetsAndFallback } from './spaStatic.js'
 
 declare module '@fastify/jwt' {
   interface FastifyJWT {
@@ -1629,6 +1630,8 @@ async function bootstrap() {
   } else {
     await app.register(mountPublicAndGuardedRoutes)
   }
+
+  if (env.spaRoot) await registerSpaAssetsAndFallback(app, env.spaRoot)
 
   await app.listen({ port: env.port, host: '0.0.0.0' })
 
