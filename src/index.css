@@ -109,21 +109,133 @@ body {
   }
 }
 
-.checkout-pos-grid {
+/**
+ * Abschlussbereich: Desktop großzügig, Tablet/iPad (≤1180px) kompakt — mehr Platz für Produkt + Warenkorb.
+ */
+.checkout-pos-grid.checkout-grid {
+  gap: 0.5rem;
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-@media (min-width: 1181px) {
-  .checkout-pos-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+/* Schmale Tablets / Hochformat: 2×2 */
+@media (max-width: 900px) {
+  .checkout-pos-grid.checkout-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 }
 
-/* Footer checkout area: stack vertically, allow scrolling on small screens */
+/* iPad Querformat u. ä.: eine Zeile mit vier Abschlussarten */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .checkout-pos-grid.checkout-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
+@media (min-width: 1181px) {
+  .checkout-pos-grid.checkout-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+}
+
+/* Button-Maße: Desktop touch-groß */
+@media (min-width: 1181px) {
+  .checkout-button {
+    min-height: 80px;
+    padding: 0.5rem 0.75rem;
+  }
+  .checkout-button-title {
+    font-size: 1rem;
+    line-height: 1.25;
+  }
+  @media (min-width: 1280px) {
+    .checkout-button-title {
+      font-size: 1.125rem;
+    }
+  }
+  .checkout-button-subtitle {
+    font-size: 0.75rem;
+    line-height: 1.2;
+  }
+  .deposit-button {
+    min-height: 52px;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+  }
+  .deposit-button-subtitle {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .checkout-section,
+  .special-actions {
+    padding: 8px;
+  }
+  .checkout-section-heading,
+  .special-actions-heading {
+    margin-bottom: 6px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+  .pos-checkout-footer {
+    gap: 8px;
+  }
+  .checkout-pos-grid.checkout-grid {
+    gap: 8px;
+  }
+  .checkout-button {
+    min-height: 56px;
+    max-height: 64px;
+    padding: 8px 10px;
+    border-radius: 0.65rem;
+    box-shadow:
+      0 0 12px rgba(255, 0, 60, 0.12),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  }
+  .checkout-button-title {
+    font-size: 14px;
+    line-height: 1.15;
+  }
+  .checkout-button-subtitle {
+    font-size: 10px;
+    line-height: 1.15;
+    font-weight: 600;
+  }
+  .special-actions {
+    margin-top: 0;
+  }
+  .deposit-button {
+    min-height: 48px;
+    max-height: 56px;
+    padding: 6px 10px;
+    border-radius: 0.5rem;
+  }
+  .deposit-button-title {
+    font-size: 13px;
+    line-height: 1.2;
+  }
+  .deposit-button-subtitle {
+    font-size: 10px;
+    line-height: 1.15;
+  }
+}
+
+/* Footer: weniger Höhe blockieren als früher (45vh) */
 .pos-checkout-footer {
   flex-direction: column;
   overflow-y: auto;
-  max-height: 45vh;
+  max-height: min(34vh, 320px);
+}
+
+@media (max-width: 1180px) {
+  .pos-checkout-footer {
+    max-height: min(30vh, 280px);
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+  }
 }
 
 @media (min-width: 1181px) {

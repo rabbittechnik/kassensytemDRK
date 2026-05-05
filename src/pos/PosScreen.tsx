@@ -1674,66 +1674,66 @@ export function PosScreen({
         </aside>
       </div>
 
-      <footer className="pos-checkout-footer flex min-w-0 flex-shrink-0 space-y-3 border-t border-[#ff003c]/30 bg-black px-3 pb-4 pt-3 md:px-5">
-        <div className="rounded-xl border border-[#ff003c]/40 bg-neutral-950/40 p-3">
-          <p className="mb-2 text-xs font-black uppercase tracking-[0.12em] text-[#FFD700]">
+      <footer className="pos-checkout-footer flex min-w-0 flex-shrink-0 flex-col gap-2 border-t border-[#ff003c]/30 bg-black px-3 pb-3 pt-2 md:px-5 lg:gap-3 lg:pb-4 lg:pt-3">
+        <div className="checkout-section rounded-xl border border-[#ff003c]/40 bg-neutral-950/40 p-3">
+          <p className="checkout-section-heading mb-2 text-xs font-black uppercase tracking-[0.12em] text-[#FFD700]">
             Abschlussart wählen
           </p>
-          <div className="checkout-pos-grid grid gap-2">
+          <div className="checkout-pos-grid checkout-grid grid gap-2">
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
             onClick={() => openCashModal('withBon')}
             title="Kunde bezahlt bar."
-            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-emerald-400/70 bg-emerald-900/30 px-3 py-2 text-base font-black uppercase text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.28)] transition enabled:hover:bg-emerald-900/45 disabled:opacity-35 lg:text-lg"
+            className="checkout-button flex flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl border-2 border-emerald-400/70 bg-emerald-900/30 font-black uppercase text-emerald-50 shadow-[0_0_22px_rgba(16,185,129,.28)] transition enabled:hover:bg-emerald-900/45 disabled:opacity-35"
           >
-            Barzahlung
-            <span className="text-xs font-bold text-emerald-200">F12 / Enter</span>
+            <span className="checkout-button-title">Barzahlung</span>
+            <span className="checkout-button-subtitle font-bold text-emerald-200">F12 / Enter</span>
           </button>
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => setCardOpen(true)}
             title="Kunde bezahlt per Karte."
-            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-cyan-400/70 bg-cyan-950/25 px-3 py-2 text-base font-black uppercase text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,.22)] transition enabled:hover:bg-cyan-950/40 disabled:opacity-35 lg:text-lg"
+            className="checkout-button flex flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl border-2 border-cyan-400/70 bg-cyan-950/25 font-black uppercase text-cyan-100 shadow-[0_0_20px_rgba(34,211,238,.22)] transition enabled:hover:bg-cyan-950/40 disabled:opacity-35"
           >
-            Kartenzahlung
-            <span className="text-xs font-bold text-cyan-200">F11</span>
+            <span className="checkout-button-title">Kartenzahlung</span>
+            <span className="checkout-button-subtitle font-bold text-cyan-200">F11</span>
           </button>
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0 || (!remoteMode && !demoMode)}
             onClick={() => setInvoiceOpen(true)}
             title={!remoteMode && !demoMode ? 'Auf Team/Verein buchen. (Erfordert API + Login)' : 'Auf Team/Verein buchen.'}
-            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-cyan-500/70 bg-cyan-950/20 px-3 py-2 text-base font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-cyan-950/35 disabled:opacity-35 lg:text-lg"
+            className="checkout-button flex flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl border-2 border-cyan-500/70 bg-cyan-950/20 font-black uppercase text-cyan-200 shadow-[0_0_22px_rgba(34,211,238,.2)] transition enabled:hover:bg-cyan-950/35 disabled:opacity-35"
           >
-            Auf Rechnung
+            <span className="checkout-button-title">Auf Rechnung</span>
           </button>
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0}
             onClick={() => void handleHelperConsumption()}
             title="Kostenlose Helferausgabe dokumentieren."
-            className="flex min-h-[80px] flex-col items-center justify-center whitespace-nowrap rounded-xl border-2 border-orange-400/70 bg-orange-900/25 px-3 py-2 text-base font-black uppercase text-orange-100 shadow-[0_0_22px_rgba(251,146,60,.24)] transition enabled:hover:bg-orange-900/40 disabled:opacity-35 lg:text-lg"
+            className="checkout-button flex flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl border-2 border-orange-400/70 bg-orange-900/25 font-black uppercase text-orange-100 shadow-[0_0_22px_rgba(251,146,60,.24)] transition enabled:hover:bg-orange-900/40 disabled:opacity-35"
           >
-            Helferverpflegung
-            <span className="text-xs font-bold text-orange-200">0,00 EUR - dokumentieren</span>
+            <span className="checkout-button-title leading-tight">Helferverpflegung</span>
+            <span className="checkout-button-subtitle font-bold text-orange-200">0,00 EUR · dokumentieren</span>
           </button>
         </div>
         </div>
-        <div className="rounded-xl border border-sky-500/35 bg-sky-950/15 p-3">
-          <p className="mb-2 text-xs font-black uppercase tracking-[0.12em] text-sky-200">
+        <div className="special-actions rounded-xl border border-sky-500/35 bg-sky-950/15 p-3">
+          <p className="special-actions-heading mb-2 text-xs font-black uppercase tracking-[0.12em] text-sky-200">
             Sonderfunktion
           </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-2">
           <button
             type="button"
             onClick={() => void handleDepositRedeem()}
             title="Pfandbon prüfen und Pfand zurückzahlen."
-            className="flex min-h-[44px] flex-col items-center justify-center whitespace-nowrap rounded-lg border border-sky-500/60 bg-sky-950/25 px-3 py-2 text-sm font-bold uppercase text-sky-100 hover:bg-sky-950/40 disabled:opacity-35 sm:min-h-[52px]"
+            className="deposit-button flex flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-lg border border-sky-500/60 bg-sky-950/25 font-bold uppercase text-sky-100 hover:bg-sky-950/40 disabled:opacity-35"
           >
-            Pfand auszahlen
-            <span className="text-[11px] font-semibold text-sky-200">Flasche/Bon zurück</span>
+            <span className="deposit-button-title">Pfand auszahlen</span>
+            <span className="deposit-button-subtitle font-semibold text-sky-200">Flasche/Bon zurück</span>
           </button>
           </div>
         </div>
