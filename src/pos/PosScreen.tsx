@@ -174,7 +174,7 @@ export function PosScreen({
   dataMode = 'offline',
   onActivateOnlineMode,
   onActivateOfflineMode,
-  onApiLogout,
+  onApiLogout: _onApiLogout,
 }: PosScreenProps) {
   const { checkForUpdate, applyUpdate } = usePwaUpdate()
   const remoteMode = Boolean(hasApi() && apiJwt && dataMode === 'api')
