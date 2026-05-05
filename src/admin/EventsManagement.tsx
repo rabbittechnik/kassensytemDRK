@@ -343,7 +343,7 @@ function EventEditorModal(props: {
   onSaved: () => void
 }) {
   const isNew = props.mode === 'new'
-  const ex = isNew ? null : props.mode
+  const ex: EventRow | null = props.mode === 'new' ? null : props.mode
   const [name, setName] = useState(ex?.name ?? '')
   const [startDate, setStartDate] = useState(ex?.startDate ?? format(new Date(), 'yyyy-MM-dd'))
   const [endDate, setEndDate] = useState(ex?.endDate ?? format(new Date(), 'yyyy-MM-dd'))
