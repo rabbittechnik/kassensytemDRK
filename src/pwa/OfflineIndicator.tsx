@@ -35,7 +35,7 @@ export function OfflineIndicator() {
 
     const ping = async () => {
       try {
-        const res = await apiFetch('/health', { method: 'GET' })
+        const res = await apiFetch('/health', { method: 'GET', cache: 'no-store' })
         if (!cancelled) setBackendOk(res.ok)
       } catch {
         if (!cancelled) setBackendOk(false)

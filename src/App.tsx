@@ -7,7 +7,7 @@ import { db } from './db/database'
 import { sha256Hex } from './lib/pin'
 import { getStoredToken, hasApi } from './api/config'
 import { logOut } from './api/auth'
-import { resolveApiUrl } from './api/http'
+import { checkServerReachability } from './api/http'
 import { DemoBanner } from './demo/DemoBanner'
 import { OfflineIndicator } from './pwa/OfflineIndicator'
 import { PwaUpdateProvider } from './pwa/PwaUpdateProvider'
@@ -112,14 +112,10 @@ export default function App() {
     if (!ready || !hasApi()) return
     let alive = true
     const probe = async () => {
-      try {
-        const res = await fetch(resolveApiUrl('/health'), { method: 'GET' })
-        if (!alive) return
-        setApiReachable(res.status > 0)
-      } catch {
-        if (!alive) return
-        setApiReachable(false)
-      }
+      const result = await checkServerReachability('/health')
+      if (!alive) return
+      // Treat "auth required" (401/403) as reachable — server is up, just needs login
+      setApiReachable(result.reachable || result.requiresAuth)
     }
     void probe()
     const t = window.setInterval(() => void probe(), 15000)

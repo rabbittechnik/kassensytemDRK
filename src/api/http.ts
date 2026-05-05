@@ -44,6 +44,34 @@ export function describeApiReachability(path = '/health'): string {
   }
 }
 
+/**
+ * Prüft, ob der Server erreichbar ist, und unterscheidet zwischen
+ * "nicht erreichbar" und "Authentifizierung erforderlich".
+ *
+ * - HTTP 200        → reachable: true,  requiresAuth: false
+ * - HTTP 401 / 403  → reachable: true,  requiresAuth: true
+ * - Netzwerkfehler / 5xx → reachable: false, requiresAuth: false
+ */
+export async function checkServerReachability(path = '/health'): Promise<{
+  reachable: boolean
+  requiresAuth: boolean
+  status: number | null
+}> {
+  try {
+    const url = resolveApiUrl(path)
+    const res = await fetch(url, { method: 'GET', cache: 'no-store' })
+    if (res.status === 401 || res.status === 403) {
+      return { reachable: true, requiresAuth: true, status: res.status }
+    }
+    if (res.status >= 500) {
+      return { reachable: false, requiresAuth: false, status: res.status }
+    }
+    return { reachable: res.status > 0, requiresAuth: false, status: res.status }
+  } catch {
+    return { reachable: false, requiresAuth: false, status: null }
+  }
+}
+
 export async function apiFetch(path: string, init: ApiFetchInit = {}): Promise<Response> {
   const token = getStoredToken()
   const headers = new Headers(init.headers)
