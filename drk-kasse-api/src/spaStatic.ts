@@ -41,21 +41,6 @@ export async function registerSpaAssetsAndFallback(
   }
   app.get('/', sendSpaIndexHtml)
   app.get('/index.html', sendSpaIndexHtml)
-  app.head('/', async (_req, reply) => {
-    return reply
-      .header('Cache-Control', 'no-cache, no-store, must-revalidate')
-      .type('text/html')
-      .code(200)
-      .send()
-  })
-  app.head('/index.html', async (_req, reply) => {
-    return reply
-      .header('Cache-Control', 'no-cache, no-store, must-revalidate')
-      .type('text/html')
-      .code(200)
-      .send()
-  })
-
   await app.register(fastifyStatic, {
     root,
     prefix: '/',
