@@ -1747,7 +1747,33 @@ export function PosScreen({
           </button>
         </div>
         </div>
-        <div className="special-actions rounded-xl border border-sky-500/35 bg-sky-950/15 p-3">
+        <div className="hidden grid-cols-2 gap-2 max-[1180px]:grid">
+          <button
+            type="button"
+            onClick={() => void handleDepositRedeem()}
+            title="Pfandbon prüfen und Pfand zurückzahlen."
+            className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-sky-500/60 bg-sky-950/30 px-3 py-2 text-xs font-black uppercase text-sky-100"
+          >
+            Pfand auszahlen
+          </button>
+          <button
+            type="button"
+            onClick={() => onOpenAdmin()}
+            title="Einstellungen und Artikelverwaltung öffnen."
+            className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-500 bg-neutral-900 px-3 py-2 text-xs font-black uppercase text-slate-200"
+          >
+            Einstellungen
+          </button>
+          <button
+            type="button"
+            className="col-span-2 min-h-[44px] rounded-lg border border-[#ff003c]/40 bg-neutral-950 px-3 py-2 text-xs font-black uppercase text-[#FFD700]"
+            onClick={() => setToolsOpen((v) => !v)}
+          >
+            Werkzeuge {toolsOpen ? '▴' : '▾'}
+          </button>
+        </div>
+
+        <div className="special-actions hidden rounded-xl border border-sky-500/35 bg-sky-950/15 p-3 min-[1181px]:block">
           <p className="special-actions-heading mb-2 text-xs font-black uppercase tracking-[0.12em] text-sky-200">
             Sonderfunktion
           </p>
@@ -1847,16 +1873,6 @@ export function PosScreen({
                 </div>
               )
             })()}
-
-          <div className="flex items-center justify-between gap-2 lg:hidden">
-            <button
-              type="button"
-              className="min-h-[44px] flex-1 rounded-lg border border-[#ff003c]/40 bg-neutral-950 px-3 py-2 text-xs font-black uppercase text-[#FFD700]"
-              onClick={() => setToolsOpen((v) => !v)}
-            >
-              Werkzeuge {toolsOpen ? '▴' : '▾'}
-            </button>
-          </div>
 
           <div
             className={[
