@@ -466,6 +466,7 @@ export function PosScreen({
   const [helperModalOpen, setHelperModalOpen] = useState(false)
   const [helperNote, setHelperNote] = useState('')
   const [helperBusy, setHelperBusy] = useState(false)
+  const [tabletCheckoutOpen, setTabletCheckoutOpen] = useState(false)
   const [depositModalOpen, setDepositModalOpen] = useState(false)
   const [depositQty, setDepositQty] = useState(1)
   const [depositAmountCents, setDepositAmountCents] = useState(25)
@@ -1347,10 +1348,20 @@ export function PosScreen({
   }, [cart, totalWithDeposit])
 
   const modalsBlockKeys =
-    cardOpen || cashOpen || invoiceOpen || helperModalOpen || depositModalOpen
+    cardOpen ||
+    cashOpen ||
+    invoiceOpen ||
+    helperModalOpen ||
+    depositModalOpen ||
+    tabletCheckoutOpen
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (tabletCheckoutOpen && e.key === 'Escape') {
+        e.preventDefault()
+        setTabletCheckoutOpen(false)
+        return
+      }
       if (modalsBlockKeys) return
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement)
         return
@@ -1381,6 +1392,7 @@ export function PosScreen({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [
+    tabletCheckoutOpen,
     modalsBlockKeys,
     cart.length,
     printBusy,
@@ -1676,10 +1688,24 @@ export function PosScreen({
 
       <footer className="pos-checkout-footer flex min-h-0 min-w-0 flex-col gap-2 border-t border-[#ff003c]/30 bg-black px-3 pb-3 pt-2 md:px-5 lg:gap-3 lg:pb-4 lg:pt-3">
         <div className="checkout-section rounded-xl border border-[#ff003c]/40 bg-neutral-950/40 p-3">
-          <p className="checkout-section-heading mb-2 text-xs font-black uppercase tracking-[0.12em] text-[#FFD700]">
+          <p className="checkout-section-heading mb-2 hidden text-xs font-black uppercase tracking-[0.12em] text-[#FFD700] min-[1181px]:block">
             Abschlussart wählen
           </p>
-          <div className="checkout-pos-grid checkout-grid grid gap-2">
+          {/* Tablet / schmale Ansichten: ein Button — Details im Overlay (mehr Platz für Artikel/Warenkorb) */}
+          <div className="hidden max-[1180px]:block">
+            <button
+              type="button"
+              disabled={!saleAvailability.canSell || cart.length === 0}
+              onClick={() => setTabletCheckoutOpen(true)}
+              className="tablet-pay-button flex min-h-[48px] w-full flex-col items-center justify-center gap-1 rounded-xl border-2 border-[#FFD700]/80 bg-gradient-to-br from-[#ff003c]/90 to-red-950/95 px-4 py-3 font-black uppercase tracking-wide text-white shadow-[0_0_28px_rgba(255,215,0,0.35)] transition enabled:active:scale-[0.98] disabled:opacity-35"
+            >
+              <span className="text-base sm:text-lg">Bezahlen</span>
+              <span className="text-sm font-black tabular-nums text-[#FFD700] sm:text-base">
+                {formatMoney(totalWithDeposit)}
+              </span>
+            </button>
+          </div>
+          <div className="checkout-pos-grid checkout-grid hidden gap-2 min-[1181px]:grid">
           <button
             type="button"
             disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
@@ -1985,6 +2011,95 @@ export function PosScreen({
           </div>
         </div>
       </footer>
+
+      {tabletCheckoutOpen && (
+        <div
+          className="fixed inset-0 z-[115] flex items-end justify-center bg-black/75 p-3 pb-6 backdrop-blur-sm sm:items-center sm:p-6"
+          onClick={() => setTabletCheckoutOpen(false)}
+          role="presentation"
+        >
+          <div
+            className="panel-glass w-full max-w-md rounded-2xl border border-[#ff003c]/45 p-4 shadow-[0_0_48px_rgba(0,0,0,0.55)]"
+            role="dialog"
+            aria-modal
+            aria-labelledby="tablet-checkout-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="tablet-checkout-title"
+              className="text-center text-lg font-black uppercase tracking-wide text-[#FFD700]"
+            >
+              Abschlussart wählen
+            </h3>
+            <p className="mt-1 text-center text-sm font-semibold tabular-nums text-white">
+              Zu zahlen: <span className="text-[#FFD700]">{formatMoney(totalWithDeposit)}</span>
+            </p>
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                type="button"
+                disabled={!saleAvailability.canSell || cart.length === 0 || printBusy}
+                onClick={() => {
+                  setTabletCheckoutOpen(false)
+                  openCashModal('withBon')
+                }}
+                className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border-2 border-emerald-400/70 bg-emerald-900/35 font-black uppercase text-emerald-50 transition enabled:active:scale-[0.99] disabled:opacity-35"
+              >
+                <span className="text-sm">Barzahlung</span>
+                <span className="text-[11px] font-bold text-emerald-200">F12 / Enter</span>
+              </button>
+              <button
+                type="button"
+                disabled={!saleAvailability.canSell || cart.length === 0}
+                onClick={() => {
+                  setTabletCheckoutOpen(false)
+                  setCardOpen(true)
+                }}
+                className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border-2 border-cyan-400/70 bg-cyan-950/30 font-black uppercase text-cyan-100 transition enabled:active:scale-[0.99] disabled:opacity-35"
+              >
+                <span className="text-sm">Kartenzahlung</span>
+                <span className="text-[11px] font-bold text-cyan-200">F11</span>
+              </button>
+              <button
+                type="button"
+                disabled={!saleAvailability.canSell || cart.length === 0 || (!remoteMode && !demoMode)}
+                onClick={() => {
+                  setTabletCheckoutOpen(false)
+                  setInvoiceOpen(true)
+                }}
+                title={
+                  !remoteMode && !demoMode ?
+                    'Auf Team/Verein buchen. (Erfordert API + Login)'
+                  : 'Auf Team/Verein buchen.'
+                }
+                className="flex min-h-[52px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-cyan-950/25 font-black uppercase text-cyan-200 transition enabled:active:scale-[0.99] disabled:opacity-35"
+              >
+                <span className="text-sm">Auf Rechnung</span>
+              </button>
+              <button
+                type="button"
+                disabled={!saleAvailability.canSell || cart.length === 0}
+                onClick={() => {
+                  setTabletCheckoutOpen(false)
+                  void handleHelperConsumption()
+                }}
+                className="flex min-h-[52px] flex-col items-center justify-center gap-0.5 rounded-xl border-2 border-orange-400/70 bg-orange-900/30 font-black uppercase text-orange-100 transition enabled:active:scale-[0.99] disabled:opacity-35"
+              >
+                <span className="text-sm leading-tight">Helferverpflegung</span>
+                <span className="text-[11px] font-bold text-orange-200">
+                  0,00 EUR · dokumentieren
+                </span>
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTabletCheckoutOpen(false)}
+              className="mt-4 w-full rounded-xl border border-white/25 py-3 text-sm font-semibold uppercase text-slate-300 transition hover:bg-white/5"
+            >
+              Zurück
+            </button>
+          </div>
+        </div>
+      )}
 
       {cashOpen && (
         <CashTenderModal

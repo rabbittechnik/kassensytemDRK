@@ -237,7 +237,8 @@ body {
 @media (max-width: 1180px) {
   .pos-checkout-footer {
     flex-shrink: 1;
-    max-height: min(22vh, 210px);
+    /* Ein „Bezahlen“-Button statt Vierer-Grid: Fußzeile etwas niedriger → mehr Höhe fürs Raster */
+    max-height: min(19vh, 188px);
     padding-top: 0.5rem;
     padding-bottom: 0.5rem;
   }
