@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
+import { AppErrorBoundary } from './AppErrorBoundary.tsx'
 import { initPwaInstallTracking } from './pwa/installPrompt'
 import {
   logPwaStartupDebug,
@@ -17,7 +18,9 @@ function mountReact() {
   if (!el) return
   createRoot(el).render(
     <StrictMode>
-      <App />
+      <AppErrorBoundary>
+        <App />
+      </AppErrorBoundary>
     </StrictMode>,
   )
 }
