@@ -15,6 +15,8 @@ function withProductAssetVersion(relPath: string): string {
 /** Dateiname unter `public/assets/products/` ohne `p-`, ggf. Sonder-Mapping */
 const ID_TO_PRODUCT_SLUG: Record<string, string> = {
   'p-rote': 'rote-wurst',
+  /** Datei heißt currywurst.png (nicht curry.png aus ID p-curry) */
+  'p-curry': 'currywurst',
   'p-bitterlemon': 'bitter-lemon',
   'p-kuchenstueck': 'kuchenstueck',
   'p-broetchen': 'broetchen',
