@@ -679,7 +679,10 @@ export function PosScreen({
       if (r === 'offline') {
         showToast('Updateprüfung nicht möglich – keine Verbindung.', 4200)
       } else if (r === 'error') {
-        showToast('Update konnte nicht geprüft werden.', 4200)
+        showToast(
+          'Update-Check fehlgeschlagen (kein Service Worker oder Netzwerk). Nach einem Deploy: „Neu laden“ oder „Cache“ nutzen.',
+          5200,
+        )
       } else if (r === 'current') {
         showToast('Die App ist aktuell.', 3200)
       } else {
@@ -1876,12 +1879,24 @@ export function PosScreen({
             <CogIcon />
           </button>
           {!footerToolbarExpanded && (
-            <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-              <span className="normal-case">{modeLabel}</span>
-              {' · API '}
-              <span className="normal-case">{apiConnected ? 'verbunden' : 'aus'}</span>
-              <span className="ml-1 hidden font-mono normal-case text-slate-600 sm:inline">
-                {apiDiag.baseUrl || '/api'}
+            <span className="flex min-w-0 items-baseline gap-1.5 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <span className="min-w-0">
+                <span className="normal-case">{modeLabel}</span>
+                {' · API '}
+                <span className="normal-case">{apiConnected ? 'verbunden' : 'aus'}</span>
+                <span className="ml-1 hidden font-mono normal-case text-slate-600 sm:inline">
+                  {apiDiag.baseUrl || '/api'}
+                </span>
+              </span>
+              <span
+                className="shrink-0 tabular-nums text-[11px] font-semibold normal-case text-slate-400"
+                title={
+                  POS_APP_META.buildFormatted !== '—' ?
+                    `Build ${POS_APP_META.buildFormatted}`
+                  : `Version ${POS_APP_META.version}`
+                }
+              >
+                v{POS_APP_META.version}
               </span>
             </span>
           )}

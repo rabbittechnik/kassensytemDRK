@@ -1,4 +1,6 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
@@ -8,6 +10,22 @@ const pkg = JSON.parse(
   readFileSync(new URL('./package.json', import.meta.url), 'utf-8'),
 ) as { version: string }
 const buildAtIso = new Date().toISOString()
+
+/** Liegt nach `vite build` unter `/version.json` (für Update-Vergleich Client ↔ Server). */
+function emitAppVersionJson(): import('vite').Plugin {
+  return {
+    name: 'emit-app-version-json',
+    closeBundle() {
+      const root = fileURLToPath(new URL('.', import.meta.url))
+      const outFile = path.join(root, 'dist', 'version.json')
+      writeFileSync(
+        outFile,
+        `${JSON.stringify({ version: pkg.version, buildAt: buildAtIso })}\n`,
+        'utf-8',
+      )
+    },
+  }
+}
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -35,6 +53,7 @@ export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    emitAppVersionJson(),
     VitePWA({
       /** Nach Deploy schnell aktivieren; alte Precaches werden bereinigt. */
       registerType: 'autoUpdate',
@@ -127,6 +146,7 @@ export default defineConfig({
                 p.startsWith('/webhook/') ||
                 p === '/DATA' ||
                 p.startsWith('/DATA/') ||
+                p === '/version.json' ||
                 p === '/manifest.webmanifest' ||
                 p.startsWith('/manifest') ||
                 p === '/sw.js' ||
