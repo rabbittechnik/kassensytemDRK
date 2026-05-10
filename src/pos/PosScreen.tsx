@@ -245,6 +245,14 @@ export function PosScreen({
       .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name))
   }, [categoryForProducts])
 
+  /** Gesamter aktiver Stamm (Offline): nötig für Warenkorb/Pfand — dexProducts ist nur die aktuelle Kategorie (auf Pfand-Tab leer). */
+  const dexAllActiveProducts = useLiveQuery(async () => {
+    const rows = await db.products.toArray()
+    return rows
+      .filter((p) => p.active)
+      .sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'de'))
+  }, [])
+
   const products = remoteMode
     ? remoteProducts
         .filter((p) => p.categoryId === categoryForProducts && p.active)
@@ -460,10 +468,10 @@ export function PosScreen({
   )
 
   const productsForCart = useMemo(() => {
-    const base = remoteMode ? remoteProducts : (dexProducts ?? [])
+    const base = remoteMode ? remoteProducts : (dexAllActiveProducts ?? [])
     if (pendingDeleteSet.size === 0) return base
     return base.filter((p) => !pendingDeleteSet.has(p.id))
-  }, [remoteMode, remoteProducts, dexProducts, pendingDeleteSet])
+  }, [remoteMode, remoteProducts, dexAllActiveProducts, pendingDeleteSet])
   const productById = useMemo(
     () => new Map(productsForCart.map((p) => [p.id, p])),
     [productsForCart],
