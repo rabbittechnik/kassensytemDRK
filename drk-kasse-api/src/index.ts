@@ -211,6 +211,162 @@ async function guardedRoutes(app: FastifyInstance) {
     return { ok: true }
   })
 
+  /**
+   * Vollständiger Katalog‑Abbild von der Kasse (IndexedDB → Server): Kategorien und Produkte per Upsert.
+   * Reihenfolge: zuerst Kategorien (FK auf products). Alte Feld `vat_rate_percent` bleibt bei Updates unverändert.
+   */
+  app.post('/catalog/sync/full', async (req, reply) => {
+    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+
+    const syncBodySchema = z.object({
+      categories: z.array(
+        z.object({
+          id: z.string().min(1).max(80),
+          name: z.string().min(1).max(240),
+          sortOrder: z.number().int(),
+        }),
+      ),
+      products: z.array(
+        z.object({
+          id: z.string().min(1).max(80),
+          categoryId: z.string().min(1).max(80),
+          name: z.string().min(1).max(480),
+          priceCents: z.number().int().nonnegative(),
+          active: z.boolean(),
+          sortOrder: z.number().int(),
+          stockTracking: z.boolean(),
+          stockQty: z.number().int().nullable(),
+          stockMin: z.number().int().nullable(),
+          depositEnabled: z.boolean(),
+          depositAmount: z.number().int().nonnegative(),
+          depositName: z.string().nullable(),
+          depositType: z.string().max(120).nullable(),
+        }),
+      ),
+    })
+
+    let body
+    try {
+      body = syncBodySchema.parse(req.body ?? {})
+    } catch {
+      return reply.code(400).send({ error: 'INVALID_BODY' })
+    }
+
+    const sqlite = app.sqlite
+    const upsertCategory = sqlite.prepare(`
+      INSERT INTO categories (id, name, sort_order) VALUES (@id, @name, @sort_order)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        sort_order = excluded.sort_order
+    `)
+    const existsProduct = sqlite.prepare(`SELECT id FROM products WHERE id = ?`)
+    const insertProduct = sqlite.prepare(`
+      INSERT INTO products (
+        id, category_id, name, price_cents, active, sort_order,
+        vat_rate_percent,
+        stock_tracking, stock_qty, stock_min,
+        deposit_enabled, deposit_amount, deposit_name, deposit_type
+      ) VALUES (
+        ?, ?, ?, ?, ?, ?,
+        19,
+        ?, ?, ?, ?, ?, ?, ?
+      )
+    `)
+    const updateProduct = sqlite.prepare(`
+      UPDATE products SET
+        category_id = ?,
+        name = ?,
+        price_cents = ?,
+        active = ?,
+        sort_order = ?,
+        stock_tracking = ?,
+        stock_qty = ?,
+        stock_min = ?,
+        deposit_enabled = ?,
+        deposit_amount = ?,
+        deposit_name = ?,
+        deposit_type = ?
+      WHERE id = ?
+    `)
+
+    const trx = sqlite.transaction(() => {
+      for (const c of body.categories) {
+        upsertCategory.run({
+          id: c.id.trim(),
+          name: c.name.trim(),
+          sort_order: c.sortOrder,
+        })
+      }
+
+      for (const p of body.products) {
+        const active = p.active ? 1 : 0
+        const st = p.stockTracking ? 1 : 0
+        const depE = (p.depositEnabled || p.depositAmount > 0) ? 1 : 0
+
+        const id = p.id.trim()
+        const cid = p.categoryId.trim()
+        const ex = existsProduct.get(id)
+
+        if (ex) {
+          updateProduct.run(
+            cid,
+            p.name.trim(),
+            p.priceCents,
+            active,
+            p.sortOrder,
+            st,
+            p.stockQty,
+            p.stockMin,
+            depE,
+            p.depositAmount,
+            p.depositName?.trim() || null,
+            p.depositType?.trim() || null,
+            id,
+          )
+        } else {
+          insertProduct.run(
+            id,
+            cid,
+            p.name.trim(),
+            p.priceCents,
+            active,
+            p.sortOrder,
+            st,
+            p.stockQty,
+            p.stockMin,
+            depE,
+            p.depositAmount,
+            p.depositName?.trim() || null,
+            p.depositType?.trim() || null,
+          )
+        }
+      }
+    })
+
+    try {
+      trx()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e)
+      return reply.code(500).send({
+        error: 'CATALOG_SYNC_FAILED',
+        message: msg,
+      })
+    }
+
+    appendAudit({
+      db: app.sqlite,
+      dataRoot: app.dataRoot,
+      type: 'catalog_sync_full',
+      userId: req.user.sub,
+      payload: {
+        categories: body.categories.length,
+        products: body.products.length,
+      },
+    })
+
+    return { ok: true, categoriesUpserted: body.categories.length, productsUpserted: body.products.length }
+  })
+
   app.get('/settings', async (_req) => {
     const keys = [
       'org_name',

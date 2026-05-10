@@ -3,6 +3,11 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 
+import {
+  mapRemoteCatalogProduct,
+  mapRemoteCategoryRow,
+  syncCatalogBidirectional,
+} from '../db/catalogSync'
 import { db } from '../db/database'
 import { defaultOutputGroupForProduct } from '../db/productOutputDefaults'
 import {
@@ -218,81 +223,6 @@ export function PosScreen({
     null,
   )
   const [remoteProducts, setRemoteProducts] = useState<ProductRow[]>([])
-
-  useEffect(() => {
-    if (!remoteMode) return
-    void (async () => {
-      try {
-        const c = await apiJson<CategoryRow[]>('/catalog/categories')
-        const pr = await apiJson<unknown[]>('/catalog/products')
-        const mapped: ProductRow[] = Array.isArray(pr)
-          ? pr.map((p) => {
-              const row = p as Record<string, unknown>
-              return {
-                id: String(row.id),
-                categoryId: String(row.categoryId ?? row.category_id),
-                name: String(row.name),
-                priceCents:
-                  typeof row.priceCents === 'number'
-                    ? row.priceCents
-                    : Number(row.price_cents ?? 0),
-                active:
-                  typeof row.active === 'boolean'
-                    ? row.active
-                    : Boolean(Number(row.active ?? 1)),
-                sortOrder:
-                  typeof row.sortOrder === 'number'
-                    ? row.sortOrder
-                    : Number(row.sort_order ?? 0),
-                stockTracking:
-                  typeof row.stockTracking === 'boolean'
-                    ? row.stockTracking
-                    : Boolean(Number(row.stock_tracking ?? 0)),
-                stockQty:
-                  typeof row.stockQty === 'number'
-                    ? row.stockQty
-                    : row.stock_qty == null
-                      ? null
-                      : Number(row.stock_qty),
-                stockMin:
-                  typeof row.stockMin === 'number'
-                    ? row.stockMin
-                    : row.stock_min == null
-                      ? null
-                      : Number(row.stock_min),
-                depositEnabled:
-                  typeof row.depositEnabled === 'boolean'
-                    ? row.depositEnabled
-                    : Boolean(Number(row.deposit_enabled ?? 0)),
-                depositAmount:
-                  typeof row.depositAmount === 'number'
-                    ? row.depositAmount
-                    : Number(row.deposit_amount ?? 0),
-                depositType:
-                  row.depositType == null && row.deposit_type == null ?
-                    null
-                  : String(row.depositType ?? row.deposit_type) as ProductRow['depositType'],
-                depositName:
-                  row.depositName == null && row.deposit_name == null ?
-                    null
-                  : String(row.depositName ?? row.deposit_name),
-                imageUrl:
-                  row.imageUrl != null ?
-                    String(row.imageUrl)
-                  : row.image_url != null ?
-                    String(row.image_url)
-                  : undefined,
-              }
-            })
-          : []
-        setRemoteCategories(Array.isArray(c) ? (c as CategoryRow[]) : [])
-        setRemoteProducts(mapped)
-      } catch {
-        setRemoteCategories([])
-        setRemoteProducts([])
-      }
-    })()
-  }, [remoteMode])
 
   const categories = remoteMode
     ? (remoteCategories ?? [])
@@ -587,6 +517,59 @@ export function PosScreen({
     setToast(msg)
     window.setTimeout(() => setToast(null), ms)
   }
+
+  /** Server-Katalog laden; vorher (nicht-DEMO): bidirektionaler Abgleich lokal ⇄ Server. */
+  useEffect(() => {
+    if (!remoteMode) {
+      setRemoteCategories(null)
+      setRemoteProducts([])
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      try {
+        if (!demoMode) {
+          const sync = await syncCatalogBidirectional()
+          if (cancelled) return
+          if (!sync.ok && sync.error) {
+            setToast(`Katalog-Sync: ${sync.error}`)
+            window.setTimeout(() => setToast(null), 6500)
+            setRemoteCategories([])
+            setRemoteProducts([])
+            return
+          }
+          if (sync.ok) {
+            setToast(
+              sync.pushed ?
+                'Katalog synchron: lokaler Artikelstamm wurde zum Server übertragen.'
+              : 'Katalog vom Server übernommen (lokale DB aktualisiert).',
+            )
+            window.setTimeout(() => setToast(null), 4200)
+          }
+        }
+
+        const c = await apiJson<unknown[]>('/catalog/categories')
+        const pr = await apiJson<unknown[]>('/catalog/products')
+        if (cancelled) return
+        const mapped: ProductRow[] = Array.isArray(pr)
+          ? pr.map((p) => mapRemoteCatalogProduct(p as Record<string, unknown>))
+          : []
+        const catRows: CategoryRow[] = Array.isArray(c)
+          ? c.map((row) => mapRemoteCategoryRow(row as Record<string, unknown>))
+          : []
+        setRemoteCategories(catRows)
+        setRemoteProducts(mapped)
+      } catch {
+        if (!cancelled) {
+          setRemoteCategories([])
+          setRemoteProducts([])
+        }
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [remoteMode, demoMode])
 
   const runApiDiagnostics = useCallback(async () => {
     const base = apiBaseUrl()
