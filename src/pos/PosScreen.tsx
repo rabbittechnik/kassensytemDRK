@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 
+import { PFAND_PAYOUT_CATEGORY_SETTING } from '../db/depositMirror'
 import { db } from '../db/database'
 import { defaultOutputGroupForProduct } from '../db/productOutputDefaults'
 import {
@@ -526,9 +527,19 @@ export function PosScreen({
     [cartDepositDetails],
   )
   const totalWithDeposit = wareTotal + depositTotal
+  const pfandPayoutCategorySetting = useLiveQuery(
+    () => db.settings.get(PFAND_PAYOUT_CATEGORY_SETTING),
+    [],
+  )
+  const pfandPayoutCategoryId =
+    (pfandPayoutCategorySetting?.value ?? '').trim() || null
   const depositOptions = useMemo(() => {
     const map = new Map<string, DepositOption>()
-    for (const p of productsForCart) {
+    const pool =
+      pfandPayoutCategoryId ?
+        productsForCart.filter((p) => p.categoryId === pfandPayoutCategoryId)
+      : productsForCart
+    for (const p of pool) {
       const enabled = Boolean(p.depositEnabled) || Number(p.depositAmount ?? 0) > 0
       const amount = Math.max(0, Number(p.depositAmount ?? 0))
       if (!enabled || amount <= 0) continue
@@ -539,7 +550,7 @@ export function PosScreen({
       }
     }
     return [...map.values()].sort((a, b) => a.amountCents - b.amountCents || a.name.localeCompare(b.name, 'de'))
-  }, [productsForCart])
+  }, [productsForCart, pfandPayoutCategoryId])
   const saleAvailability = useMemo(
     () =>
       getSaleAvailability({
@@ -987,6 +998,17 @@ export function PosScreen({
         )
         return
       }
+      if (
+        method === 'invoice' &&
+        !demoMode &&
+        saleAvailability.mode !== 'event'
+      ) {
+        showToast(
+          'Auf Rechnung ist nur möglich, wenn eine Veranstaltung aktiv ist (nicht im Standardverkauf).',
+          4800,
+        )
+        return
+      }
       if (cart.length === 0 || totalWithDeposit <= 0) return
       const snap = [...cart]
 
@@ -1131,6 +1153,9 @@ export function PosScreen({
       try {
         if (remoteMode) {
           if (!apiPay) throw new Error('MISSING_PAYMENT')
+          if (method === 'invoice' && apiPay.method !== 'invoice') {
+            throw new Error('MISSING_PAYMENT')
+          }
           const clientUuid = crypto.randomUUID()
           const sale = await apiCreateSale({
             lines: snap.map((l) => ({
@@ -1203,12 +1228,45 @@ export function PosScreen({
           else if (printRes.printedAnything) showToast('Verbucht (Server). Bons gedruckt.', 2600)
           else showToast('Verbucht (Server).', 2600)
         } else {
-          if (method === 'invoice') throw new Error('Rechnung nur mit Server-API.')
-          const r = await completeLocalSaleWithDualReceipts(snap, method, {
-            eventId: activeEvent?.id ?? null,
-          })
+          if (
+            method === 'invoice' &&
+            (!apiPay || apiPay.method !== 'invoice')
+          ) {
+            throw new Error('Rechnungsdaten fehlen (Team / Veranstaltung).')
+          }
+          const eventIdForSale =
+            method === 'invoice' && apiPay && apiPay.method === 'invoice' ?
+              apiPay.eventId
+            : activeEvent?.id ?? null
+          const teamNameInvoice =
+            method === 'invoice' ? opts?.teamName : undefined
+          const r = await completeLocalSaleWithDualReceipts(
+            snap,
+            method,
+            method === 'invoice' ?
+              { invoiceTeamName: teamNameInvoice, eventId: eventIdForSale }
+            : { eventId: activeEvent?.id ?? null },
+          )
           setCart([])
           const skipPrint = opts?.offlineSkipReceiptPrint === true && method === 'cash'
+
+          if (method === 'invoice' && apiPay && apiPay.method === 'invoice') {
+            const clientUuid = crypto.randomUUID()
+            const pending: PendingSale = {
+              clientUuid,
+              lines: snap.map((l) => ({
+                productId: l.productId,
+                qty: l.qty,
+                unitPriceCents: l.priceCents,
+                name: l.name,
+              })),
+              payment: apiPay,
+              createdAt: Date.now(),
+              eventId: apiPay.eventId,
+            }
+            writeOutbox([...readOutbox(), pending])
+          }
+
           const printRes = await printCheckoutReceiptsAfterSale({
             customerText: r.customerReceiptText,
             outputReceipts: r.outputReceipts,
@@ -1220,17 +1278,29 @@ export function PosScreen({
                 bumpLocalSalePrintSuccess(r.saleId, station),
             },
           })
+          const invoiceSyncHint =
+            method === 'invoice' ?
+              ' Wird automatisch zum Server geschickt, sobald Sie online sind.'
+            : ''
+          const verbuchtMsg =
+            method === 'cash' ?
+              skipPrint ?
+                `Verbucht.${invoiceSyncHint}`
+              : `Barzahlung verbucht.${invoiceSyncHint}`
+            : method === 'card' ?
+              `Kartenzahlung verbucht.${invoiceSyncHint}`
+            : `Auf Rechnung lokal verbucht.${invoiceSyncHint}`
           if (printRes.hadFailure) showToast(printRes.message, 5000)
           else if (printRes.printedAnything)
-            showToast(method === 'cash' ? 'Barzahlung verbucht.' : 'Kartenzahlung verbucht.', 2600)
-          else
             showToast(
               method === 'cash'
-                ? skipPrint
-                  ? 'Verbucht.'
-                  : 'Barzahlung verbucht.'
-                : 'Kartenzahlung verbucht.',
+                ? 'Barzahlung verbucht.'
+                : method === 'card'
+                  ? 'Kartenzahlung verbucht.'
+                  : `Auf Rechnung verbucht.${invoiceSyncHint}`,
+              2600,
             )
+          else showToast(verbuchtMsg.trim(), 3400)
         }
       } catch (e) {
         if (remoteMode && apiPay) {
@@ -1244,7 +1314,8 @@ export function PosScreen({
             })),
             payment: apiPay,
             createdAt: Date.now(),
-            eventId: activeEvent?.id,
+            eventId:
+              apiPay.method === 'invoice' ? apiPay.eventId : activeEvent?.id,
           }
           writeOutbox([...readOutbox(), pending])
           setCart([])
@@ -1264,6 +1335,8 @@ export function PosScreen({
       dexProducts,
       activeEvent,
       saleAvailability.canSell,
+      saleAvailability.mode,
+      demoMode,
     ],
   )
 
@@ -1289,7 +1362,11 @@ export function PosScreen({
     }
     writeOutbox(pending)
     setSyncingOutbox(false)
-    if (okCount > 0) showToast(`${okCount} Offline-Verkäufe synchronisiert.`, 3000)
+    if (okCount > 0)
+      showToast(
+        `${okCount} ausstehende Buchung(en) synchronisiert (Bar/Karte/Rechnung).`,
+        3000,
+      )
   }, [remoteMode, syncingOutbox])
 
   useEffect(() => {
@@ -1426,6 +1503,11 @@ export function PosScreen({
     undoLast,
   ])
 
+  const invoiceEligible =
+    demoMode ||
+    (saleAvailability.canSell && saleAvailability.mode === 'event')
+  /** Auf Rechnung nur bei Demo oder echt aktivem Veranstaltungsmodus — nicht beim Standardverkauf. */
+
   const revLabel =
     typeof tagesumsatz === 'number' ? formatMoney(tagesumsatz) : '0,00 €'
   const revHeading = demoMode ? 'DEMO‑Tagesumsatz' : 'Tagesumsatz'
@@ -1541,7 +1623,10 @@ export function PosScreen({
                   {depositOptions.length === 0 ?
                     <div className="col-span-full flex min-h-[12rem] flex-col items-center justify-center gap-4 px-2 text-center">
                       <p className="text-sm font-semibold text-neutral-400">
-                        Keine Pfandarten aus dem Artikelstamm gefunden.
+                        {pfandPayoutCategoryId ?
+                          'In der eingestellten Pfand-Kategorie sind keine Pfand-Artikel (mit Betrag > 0) vorhanden. Unter Admin · Kategorien prüfen und Spiegel ggf. mit „Als Pfand-Auswahl-Kategorie“ neu anstoßen.'
+                        : 'Keine Pfandarten aus dem Artikelstamm gefunden. Optional unter Admin eine Pfand-Auswahl-Kategorie festlegen.'
+                        }
                       </p>
                       <button
                         type="button"
@@ -2067,15 +2152,17 @@ export function PosScreen({
               </button>
               <button
                 type="button"
-                disabled={!saleAvailability.canSell || cart.length === 0 || (!remoteMode && !demoMode)}
+                disabled={
+                  !saleAvailability.canSell || cart.length === 0 || !invoiceEligible
+                }
                 onClick={() => {
                   setCheckoutChoiceOpen(false)
                   setInvoiceOpen(true)
                 }}
                 title={
-                  !remoteMode && !demoMode ?
-                    'Auf Team/Verein buchen. (Erfordert API + Login)'
-                  : 'Auf Team/Verein buchen.'
+                  !invoiceEligible && saleAvailability.canSell && cart.length > 0 ?
+                    'Nur bei aktiver Veranstaltung möglich (nicht beim Standardverkauf).'
+                  : 'Auf Team/Verein buchen (offline lokal möglich, Sync bei Online-Verbindung).'
                 }
                 className="checkout-button flex min-h-[52px] flex-col items-center justify-center rounded-xl border-2 border-cyan-500/70 bg-cyan-950/25 font-black uppercase text-cyan-200 transition enabled:active:scale-[0.99] disabled:opacity-35"
               >
@@ -2157,6 +2244,7 @@ export function PosScreen({
           cartLines={cart}
           totalCents={totalWithDeposit}
           defaultEventId={activeEvent?.id}
+          offlineInvoiceMode={!remoteMode && !demoMode}
           onCancel={() => setInvoiceOpen(false)}
           onConfirmed={async (p) => {
             await settleAndPrint(

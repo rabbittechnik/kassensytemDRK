@@ -260,11 +260,12 @@ export function buildOutputReceiptStoredEntries(
 }
 
 /**
- * Lokaler Verkauf (Bar/Karte): Verkauf speichern; Kundenbon + Stations-Ausgabe-Bons.
+ * Lokaler Verkauf: Verkauf speichern; Kundenbon + Stations-Ausgabe-Bons.
+ * Bei `invoice`: Teamname wie bei Server-Rechnungen auf dem Bon (`invoiceTeamName`).
  */
 export async function completeLocalSaleWithDualReceipts(
   lines: CartLine[],
-  paymentMethod: 'cash' | 'card',
+  paymentMethod: PaymentMethod,
   opts?: { invoiceTeamName?: string; eventId?: string | null },
 ): Promise<{
   saleId: string
@@ -375,13 +376,9 @@ export async function completeLocalSaleWithDualReceipts(
 export async function saveSale(
   lines: CartLine[],
   paymentMethod: PaymentMethod,
+  opts?: { invoiceTeamName?: string; eventId?: string | null },
 ): Promise<{ saleId: string; receiptNo: number; createdAt: number }> {
-  if (paymentMethod === 'invoice') {
-    throw new Error(
-      'Rechnungsverkäufe erfordern die Server-API und eine gültige API-Anmeldung.',
-    )
-  }
-  const r = await completeLocalSaleWithDualReceipts(lines, paymentMethod)
+  const r = await completeLocalSaleWithDualReceipts(lines, paymentMethod, opts)
   return { saleId: r.saleId, receiptNo: r.receiptNo, createdAt: r.createdAt }
 }
 

@@ -58,6 +58,8 @@ export interface ProductRow {
   depositAmount?: number
   depositName?: string | null
   depositType?: DepositType | null
+  /** Automatischer Pfand-Spiegel eines anderen Artikels (nur Offline-Stamm); Quell-ID */
+  depositMirrorSourceId?: string | null
 }
 
 export type EventStatus = 'planned' | 'active' | 'completed' | 'archived'

@@ -1,13 +1,10 @@
+import { useLiveQuery } from 'dexie-react-hooks'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { apiJson } from '../api/http'
+import { db } from '../db/database'
 import { formatMoney } from '../lib/format'
 import type { CartLine } from '../types'
-import {
-  addDemoTeam,
-  isDemoMode,
-  useDemoMode,
-  useDemoTeams,
-} from '../demo/demoStore'
+import { addDemoTeam, useDemoMode, useDemoTeams } from '../demo/demoStore'
 
 type TeamRow = {
   id: string
@@ -26,11 +23,34 @@ type EventRow = {
   status: string
 }
 
+const TEAM_CACHE_LS = 'drk:invoiceTeamsCache:v1'
+
+function readTeamsCache(): TeamRow[] {
+  try {
+    const raw = localStorage.getItem(TEAM_CACHE_LS)
+    if (!raw) return []
+    const arr = JSON.parse(raw) as TeamRow[]
+    return Array.isArray(arr) ? arr : []
+  } catch {
+    return []
+  }
+}
+
+function saveTeamsCache(teams: TeamRow[]) {
+  try {
+    localStorage.setItem(TEAM_CACHE_LS, JSON.stringify(teams.slice(0, 500)))
+  } catch {
+    /* ignore quota */
+  }
+}
+
 export function InvoiceSaleModal(props: {
   cartLines: CartLine[]
   totalCents: number
   /** Aktuelle Kassen-Veranstaltung – wird für Auf-Rechnung vorausgewählt. */
   defaultEventId?: string
+  /** Offline-Modus ohne API: lokale Events + zwischengespeicherte Teamliste */
+  offlineInvoiceMode?: boolean
   onCancel: () => void
   onConfirmed: (p: {
     teamId: string
@@ -42,7 +62,14 @@ export function InvoiceSaleModal(props: {
   }) => void | Promise<void>
 }) {
 
-  const { cartLines, totalCents, onCancel, onConfirmed, defaultEventId } = props
+  const {
+    cartLines,
+    totalCents,
+    onCancel,
+    onConfirmed,
+    defaultEventId,
+    offlineInvoiceMode = false,
+  } = props
   const demoMode = useDemoMode()
   const demoTeams = useDemoTeams()
 
@@ -87,8 +114,48 @@ export function InvoiceSaleModal(props: {
       }))
   }, [demoMode, demoTeams, q])
 
-  const teams: TeamRow[] = demoMode ? demoTeamList : apiTeams
-  const events: EventRow[] = demoMode ? demoEventList : apiEvents
+  const dexActiveEvents = useLiveQuery(
+    async () => {
+      const rows = await db.events.toArray()
+      return rows
+        .filter((e) => e.status === 'active')
+        .sort(
+          (a, b) =>
+            a.startDate.localeCompare(b.startDate) ||
+            String(a.name).localeCompare(String(b.name), 'de'),
+        )
+    },
+    [],
+    [],
+  )
+
+  const offlineEventRows = useMemo<EventRow[]>(() => {
+    return dexActiveEvents.map((e) => ({
+      id: e.id,
+      name: e.name,
+      startDate: e.startDate,
+      endDate: e.endDate,
+      status: 'active',
+    }))
+  }, [dexActiveEvents])
+
+  useEffect(() => {
+    if (demoMode || !offlineInvoiceMode) return
+    setApiTeams(readTeamsCache())
+  }, [demoMode, offlineInvoiceMode])
+
+  const teams: TeamRow[] = useMemo(() => {
+    if (demoMode) return demoTeamList
+    const search = q.trim().toLowerCase()
+    if (!search) return apiTeams
+    return apiTeams.filter((t) =>
+      `${t.name} ${(t.contact_name ?? '')}`.toLowerCase().includes(search),
+    )
+  }, [demoMode, demoTeamList, apiTeams, q])
+  const events: EventRow[] =
+    demoMode ? demoEventList
+    : offlineInvoiceMode ? offlineEventRows
+    : apiEvents
 
   const demoEventAutoSet = useRef(false)
   useEffect(() => {
@@ -128,7 +195,7 @@ export function InvoiceSaleModal(props: {
   }, [onCancel])
 
   useEffect(() => {
-    if (demoMode) return
+    if (demoMode || offlineInvoiceMode) return
     let alive = true
     void apiJson<EventRow[]>('/events')
       .then((ev) => {
@@ -144,10 +211,22 @@ export function InvoiceSaleModal(props: {
     return () => {
       alive = false
     }
-  }, [demoMode, defaultEventId])
+  }, [demoMode, offlineInvoiceMode, defaultEventId])
 
   useEffect(() => {
-    if (demoMode) return
+    if (demoMode || !offlineInvoiceMode) return
+    if (
+      defaultEventId &&
+      offlineEventRows.some((x) => x.id === defaultEventId)
+    ) {
+      setEventId(defaultEventId)
+    } else if (offlineEventRows.length === 1) {
+      setEventId(offlineEventRows[0].id)
+    }
+  }, [demoMode, offlineInvoiceMode, defaultEventId, offlineEventRows])
+
+  useEffect(() => {
+    if (demoMode || offlineInvoiceMode) return
     let alive = true
     const timer = window.setTimeout(() => {
       const search = q.trim()
@@ -155,7 +234,10 @@ export function InvoiceSaleModal(props: {
         `/teams${search ? `?q=${encodeURIComponent(search)}` : ''}`,
       )
         .then((t) => {
-          if (alive) setApiTeams(Array.isArray(t) ? t : [])
+          const list = Array.isArray(t) ? t : []
+          if (!alive) return
+          setApiTeams(list)
+          if (list.length > 0) saveTeamsCache(list)
         })
         .catch(() => {})
     }, 200)
@@ -164,7 +246,7 @@ export function InvoiceSaleModal(props: {
       alive = false
       window.clearTimeout(timer)
     }
-  }, [demoMode, q])
+  }, [demoMode, offlineInvoiceMode, q])
 
 
 
@@ -186,8 +268,12 @@ export function InvoiceSaleModal(props: {
     setErr(null)
     setCreateBusy(true)
     try {
+      if (offlineInvoiceMode && !demoMode) {
+        setErr('Neues Team anlegen ist offline nicht möglich.')
+        return
+      }
       // DEMO-Modus: ausschliesslich in-memory Demo-Team, KEIN POST /teams.
-      if (isDemoMode()) {
+      if (demoMode) {
         const t = addDemoTeam({
           name,
           shortName: undefined,
@@ -240,15 +326,17 @@ export function InvoiceSaleModal(props: {
       const id = r?.id?.trim?.() ?? ''
       if (!id) throw new Error('Keine Team-ID von der API.')
 
-      setApiTeams((prev) => [
-        {
-          id,
-          name,
-          contact_name: newContactName.trim(),
-          invoice_email: newInvoiceEmail.trim() || null,
-        },
-        ...prev.filter((t) => t.id !== id),
-      ])
+      const created: TeamRow = {
+        id,
+        name,
+        contact_name: newContactName.trim(),
+        invoice_email: newInvoiceEmail.trim() || null,
+      }
+      setApiTeams((prev) => {
+        const merged = [created, ...prev.filter((t) => t.id !== id)]
+        saveTeamsCache(merged)
+        return merged
+      })
       setTeamId(id)
       setContact(newContactName.trim())
       setQ('')
@@ -338,6 +426,13 @@ export function InvoiceSaleModal(props: {
               Rechnung erstellt, KEIN echter Umsatz erzeugt.
             </p>
           )}
+          {offlineInvoiceMode && !demoMode && (
+            <p className="mt-2 rounded-lg border border-cyan-500/35 bg-cyan-950/20 px-3 py-2 text-xs font-semibold text-cyan-100">
+              Offline: Veranstaltungen aus dem lokalen Speicher; Teams aus dem letzten
+              Online-Abruf. Neue Teams anlegen nur mit Netzwerk. Die Buchung wird lokal erfasst
+              und später mit dem Server abgeglichen.
+            </p>
+          )}
         </div>
 
         <div className="max-h-[60vh] space-y-3 overflow-y-auto px-5 py-4">
@@ -364,8 +459,17 @@ export function InvoiceSaleModal(props: {
           <div className="overflow-hidden rounded-xl border border-[#FFD700]/25 bg-yellow-950/10">
             <button
               type="button"
-              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#FFD700]"
-              onClick={() => setShowNewTeam((v) => !v)}
+              disabled={offlineInvoiceMode && !demoMode}
+              title={
+                offlineInvoiceMode && !demoMode ?
+                  'Neues Team nur mit aktiver Online-Verbindung.'
+                : undefined
+              }
+              className="flex w-full items-center justify-between px-4 py-3 text-left text-sm font-bold text-[#FFD700] disabled:cursor-not-allowed disabled:opacity-40"
+              onClick={() => {
+                if (offlineInvoiceMode && !demoMode) return
+                setShowNewTeam((v) => !v)
+              }}
               aria-expanded={showNewTeam}
             >
               <span>Neues Team / Verein anlegen (Server)</span>
