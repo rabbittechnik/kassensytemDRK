@@ -35,11 +35,24 @@ function autoImageHref(productId: string): string | null {
   return withProductAssetVersion(`/assets/products/${fileStem}.png`)
 }
 
+/** Sync/DB kann noch `/assets/products/curry.png` halten — dann würde das alte Bild Vorrang vor `currywurst.png` haben. */
+function isLegacyCurryCatalogImage(productId: string, imageUrl: string): boolean {
+  if (productId !== 'p-curry') return false
+  const u = imageUrl.trim()
+  if (!u) return false
+  if (u.toLowerCase().includes('currywurst')) return false
+  return (
+    /\/assets\/products\/curry(?:\.png)?(?:[?#]|$)/i.test(u) ||
+    /^assets\/products\/curry(?:\.png)?(?:[?#]|$)/i.test(u)
+  )
+}
+
 function resolvedImageSrc(
   productId: string,
   imageUrl?: string | null,
 ): string | null {
-  const u = imageUrl?.trim()
+  let u = imageUrl?.trim() ?? ''
+  if (isLegacyCurryCatalogImage(productId, u)) u = ''
   const href = u || autoImageHref(productId)
   if (!href) return null
   if (href.startsWith('/')) return withProductAssetVersion(href)

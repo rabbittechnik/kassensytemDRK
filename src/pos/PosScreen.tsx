@@ -179,6 +179,8 @@ const PFAND_TAB_ID = '__pfand_tab__'
 
 const OUTBOX_KEY = 'drk:pending-sales:v1'
 
+const POS_APP_META = buildMetaSummary()
+
 function readOutbox(): PendingSale[] {
   try {
     const raw = localStorage.getItem(OUTBOX_KEY)
@@ -1562,6 +1564,16 @@ export function PosScreen({
           </div>
           <p className="mt-1 max-w-2xl text-xs font-semibold leading-snug text-[#ff003c] md:mt-2 md:text-sm lg:text-base">
             Für ECHT. Wenn keiner damit rechnet, sind WIR da.
+          </p>
+          <p
+            className="mt-1.5 max-w-2xl text-[13px] font-semibold tabular-nums leading-normal text-slate-400 md:mt-2 md:text-sm"
+            title={
+              POS_APP_META.buildFormatted !== '—' ?
+                `Build ${POS_APP_META.buildFormatted}`
+              : undefined
+            }
+          >
+            Version {POS_APP_META.version}
           </p>
         </div>
 
