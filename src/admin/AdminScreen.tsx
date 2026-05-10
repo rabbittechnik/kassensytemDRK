@@ -1,5 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useState } from 'react'
+import { deleteCatalogProductLocalAndRemote } from '../db/catalogSync'
 import { db } from '../db/database'
 import { setSetting } from '../db/sales'
 import { sha256Hex } from '../lib/pin'
@@ -443,7 +444,7 @@ function ProductEditor(props: {
               className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-rose-100"
               onClick={async () => {
                 if (confirm('Artikel wirklich löschen?')) {
-                  await db.products.delete(existing.id)
+                  await deleteCatalogProductLocalAndRemote(existing.id)
                   onClose()
                 }
               }}

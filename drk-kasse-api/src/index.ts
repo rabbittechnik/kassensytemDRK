@@ -211,6 +211,25 @@ async function guardedRoutes(app: FastifyInstance) {
     return { ok: true }
   })
 
+  /** Artikel löschen (Admin): Verkaufshistorie bleibt über sale_lines ohne FK erhalten. */
+  app.delete('/catalog/products/:id', async (req, reply) => {
+    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+    const id = String((req.params as { id: string }).id).trim()
+    if (!id) return reply.code(400).send({ error: 'BAD_ID' })
+    const sqlite = app.sqlite
+    const ex = sqlite.prepare(`SELECT id FROM products WHERE id = ?`).get(id)
+    if (!ex) return reply.code(404).send({ error: 'NOT_FOUND' })
+    sqlite.prepare(`DELETE FROM products WHERE id = ?`).run(id)
+    appendAudit({
+      db: app.sqlite,
+      dataRoot: app.dataRoot,
+      type: 'product_deleted',
+      userId: req.user.sub,
+      payload: { id },
+    })
+    return { ok: true }
+  })
+
   /**
    * Vollständiger Katalog‑Abbild von der Kasse (IndexedDB → Server): Kategorien und Produkte per Upsert.
    * Reihenfolge: zuerst Kategorien (FK auf products). Alte Feld `vat_rate_percent` bleibt bei Updates unverändert.
@@ -219,6 +238,12 @@ async function guardedRoutes(app: FastifyInstance) {
     if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
 
     const syncBodySchema = z.object({
+      /** In Dexie bereits entfernte Artikel; werden vor Upsert vom Server gelöscht */
+      removedProductIds: z
+        .array(z.string().min(1).max(80))
+        .max(2000)
+        .optional()
+        .default([]),
       categories: z.array(
         z.object({
           id: z.string().min(1).max(80),
@@ -288,8 +313,15 @@ async function guardedRoutes(app: FastifyInstance) {
         deposit_type = ?
       WHERE id = ?
     `)
+    const deleteProductStmt = sqlite.prepare(`DELETE FROM products WHERE id = ?`)
+
+    const toRemove = [...new Set(body.removedProductIds.map((id) => id.trim()).filter(Boolean))]
 
     const trx = sqlite.transaction(() => {
+      for (const pid of toRemove) {
+        deleteProductStmt.run(pid)
+      }
+
       for (const c of body.categories) {
         upsertCategory.run({
           id: c.id.trim(),
@@ -361,10 +393,16 @@ async function guardedRoutes(app: FastifyInstance) {
       payload: {
         categories: body.categories.length,
         products: body.products.length,
+        removedProducts: toRemove.length,
       },
     })
 
-    return { ok: true, categoriesUpserted: body.categories.length, productsUpserted: body.products.length }
+    return {
+      ok: true,
+      categoriesUpserted: body.categories.length,
+      productsUpserted: body.products.length,
+      productsRemoved: toRemove.length,
+    }
   })
 
   app.get('/settings', async (_req) => {

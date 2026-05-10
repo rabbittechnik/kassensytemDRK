@@ -4,8 +4,10 @@ import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 
 import {
+  CATALOG_PENDING_DELETED_PRODUCT_IDS,
   mapRemoteCatalogProduct,
   mapRemoteCategoryRow,
+  parsePendingDeletedProductIdsFromValue,
   syncCatalogBidirectional,
 } from '../db/catalogSync'
 import { db } from '../db/database'
@@ -446,7 +448,20 @@ export function PosScreen({
     lastCheckedAt: 0,
   })
 
-  const productsForCart = remoteMode ? remoteProducts : (dexProducts ?? [])
+  const pendingDeleteSettingRow = useLiveQuery(
+    () => db.settings.get(CATALOG_PENDING_DELETED_PRODUCT_IDS),
+    [],
+  )
+  const pendingDeleteSet = useMemo(
+    () => parsePendingDeletedProductIdsFromValue(pendingDeleteSettingRow?.value),
+    [pendingDeleteSettingRow?.value],
+  )
+
+  const productsForCart = useMemo(() => {
+    const base = remoteMode ? remoteProducts : (dexProducts ?? [])
+    if (pendingDeleteSet.size === 0) return base
+    return base.filter((p) => !pendingDeleteSet.has(p.id))
+  }, [remoteMode, remoteProducts, dexProducts, pendingDeleteSet])
   const productById = useMemo(
     () => new Map(productsForCart.map((p) => [p.id, p])),
     [productsForCart],

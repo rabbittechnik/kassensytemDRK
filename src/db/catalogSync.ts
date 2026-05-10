@@ -3,14 +3,66 @@
  * 1. Optional (nur Rolle admin, nicht DEMO): lokaler IndexedDB-Stamm → Server (/catalog/sync/full).
  * 2. Server-Katalog lesen → IndexedDB übernehmen (Ausgabe-Gruppe/Bild‑URL lokaler Felder soweit möglich behalten).
  *
- * POS im API-Modus nutzt weiter separate GET-Anfragen; nach erfolgreicher Sync diese neu auslösen.
+ * Löschen: Admin ruft DELETE /catalog/products/:id auf (falls online/admin); sonst Warteschlange
+ * `catalog_pending_deleted_product_ids`. Beim nächsten Admin-/sync/full werden IDs serverseitig entfernt.
  */
 import { ApiError, apiJson } from '../api/http'
-import { getStoredRole } from '../api/config'
+import { getStoredRole, getStoredToken, hasApi } from '../api/config'
 import { isDemoMode } from '../demo/demoStore'
 import type { CategoryRow, ProductRow } from '../types'
 import { db } from './database'
 import { defaultOutputGroupForProduct } from './productOutputDefaults'
+
+/** Settings-Key (JSON Array von Produkt-IDs); gelöscht offline / bei fehlgeschlagener Server-Löschung */
+export const CATALOG_PENDING_DELETED_PRODUCT_IDS = 'catalog_pending_deleted_product_ids'
+
+const MAX_PENDING = 2000
+
+export function parsePendingDeletedProductIdsFromValue(val: string | undefined | null): Set<string> {
+  if (!val?.trim()) return new Set()
+  try {
+    const arr = JSON.parse(val) as unknown
+    if (!Array.isArray(arr)) return new Set()
+    return new Set(
+      arr
+        .filter((x): x is string => typeof x === 'string' && x.length > 0)
+        .map((id) => id.trim())
+        .filter(Boolean),
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+async function readPendingDeletedProductIds(): Promise<string[]> {
+  const row = await db.settings.get(CATALOG_PENDING_DELETED_PRODUCT_IDS)
+  return [...parsePendingDeletedProductIdsFromValue(row?.value ?? null)]
+}
+
+async function writePendingDeletedProductIds(ids: string[]): Promise<void> {
+  const uniq = [...new Set(ids)].slice(0, MAX_PENDING)
+  if (uniq.length === 0) {
+    await db.settings.delete(CATALOG_PENDING_DELETED_PRODUCT_IDS)
+    return
+  }
+  await db.settings.put({
+    key: CATALOG_PENDING_DELETED_PRODUCT_IDS,
+    value: JSON.stringify(uniq),
+  })
+}
+
+async function addPendingDeletedProductId(id: string): Promise<void> {
+  const t = id.trim()
+  if (!t) return
+  const cur = await readPendingDeletedProductIds()
+  if (!cur.includes(t)) cur.push(t)
+  await writePendingDeletedProductIds(cur)
+}
+
+/** Nach erfolgreicher Admin-Synchronisation: Server hat alle Entfernen-Befehle angewendet */
+export async function clearPendingDeletedProductIdsAfterSuccessfulPush(): Promise<void> {
+  await db.settings.delete(CATALOG_PENDING_DELETED_PRODUCT_IDS)
+}
 
 /** Mappt einen /catalog/products-Datensatz (camelCase oder snake_case) auf ProductRow. */
 export function mapRemoteCatalogProduct(p: Record<string, unknown>): ProductRow {
@@ -82,6 +134,7 @@ export function mapRemoteCategoryRow(raw: Record<string, unknown>): CategoryRow 
 }
 
 async function pushDexieCatalogToServerAdmin(): Promise<void> {
+  const pendingDeletes = await readPendingDeletedProductIds()
   const categories = await db.categories.orderBy('sortOrder').toArray()
   const products = await db.products.toArray()
   await apiJson<{ ok: boolean }>(
@@ -89,6 +142,7 @@ async function pushDexieCatalogToServerAdmin(): Promise<void> {
     {
       method: 'POST',
       body: JSON.stringify({
+        removedProductIds: pendingDeletes,
         categories: categories.map((c) => ({
           id: c.id,
           name: c.name.trim(),
@@ -113,12 +167,77 @@ async function pushDexieCatalogToServerAdmin(): Promise<void> {
       skipDemoHeader: true,
     },
   )
+  await clearPendingDeletedProductIdsAfterSuccessfulPush()
+}
+
+/**
+ * Produkt lokale löschen und Server informieren:
+ * Bei Admin+Online DELETE /catalog/products/:id (404 = bereits weg).
+ * Sonst oder bei Fehler: ID in Pending-Liste für nächstes catalog/sync/full.
+ */
+export async function deleteCatalogProductLocalAndRemote(productId: string): Promise<void> {
+  const id = productId.trim()
+  if (!id) return
+
+  if (isDemoMode()) {
+    await db.products.delete(id)
+    return
+  }
+
+  let needPending = false
+  const jwt = getStoredToken()
+  const role = getStoredRole()
+  if (hasApi() && jwt && role === 'admin' && !isDemoMode()) {
+    try {
+      await apiJson<{ ok?: boolean }>(`/catalog/products/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        skipDemoHeader: true,
+      })
+    } catch (e: unknown) {
+      if (e instanceof ApiError && e.status === 404) {
+        /* bereits entfernt */
+      } else {
+        needPending = true
+      }
+    }
+  } else {
+    needPending = true
+  }
+
+  if (needPending) await addPendingDeletedProductId(id)
+  await db.products.delete(id)
+
+  /** Wenn Produkt bereits auf Server wegwar, Pending-Eintrag ggf. entfernen */
+  if (!needPending)
+    await writePendingDeletedProductIds(
+      (await readPendingDeletedProductIds()).filter((x) => x !== id),
+    )
 }
 
 /** Holt den Server-Katalog und schreibt ihn in IndexedDB (Ausgabe/Bild‑URL vorherige Werte vorrangig). */
 export async function pullServerCatalogIntoDexie(): Promise<void> {
   const c = await apiJson<unknown[]>('/catalog/categories')
   const pr = await apiJson<unknown[]>('/catalog/products')
+
+  const pending = await readPendingDeletedProductIds()
+  const pendingSet = new Set(pending)
+
+  const rawProducts = Array.isArray(pr) ? pr : []
+
+  /** Solange Pending-Löschen und Server liefert die Zeile noch: nicht zurück in IndexedDB/Pull-Merge schreiben */
+  const mergedRaw = rawProducts.filter((row) => {
+    const rec = row as Record<string, unknown>
+    const id = String(rec.id ?? '')
+    return id && !pendingSet.has(id)
+  })
+
+  /** Pending-Einträge entfernen, sobald GET sie nicht mehr liefert (Server hat gelöscht) */
+  const remoteIdsFull = new Set(
+    rawProducts.map((row) => String((row as Record<string, unknown>).id ?? '').trim()).filter(Boolean),
+  )
+  const stillPending = pending.filter((pid) => remoteIdsFull.has(pid))
+  await writePendingDeletedProductIds(stillPending)
+
   const prev = await db.products.toArray()
   const preserve = new Map<
     string,
@@ -128,7 +247,7 @@ export async function pullServerCatalogIntoDexie(): Promise<void> {
   const cats: CategoryRow[] = (Array.isArray(c) ? c : []).map((row) =>
     mapRemoteCategoryRow(row as Record<string, unknown>),
   )
-  const prods: ProductRow[] = (Array.isArray(pr) ? pr : []).map((raw) => {
+  const prods: ProductRow[] = mergedRaw.map((raw) => {
     const row = raw as Record<string, unknown>
     const base = mapRemoteCatalogProduct(row)
     const ex = preserve.get(base.id)
