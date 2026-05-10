@@ -3,7 +3,6 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { format } from 'date-fns'
 import { de } from 'date-fns/locale'
 
-import { PFAND_PAYOUT_CATEGORY_SETTING } from '../db/depositMirror'
 import { db } from '../db/database'
 import { defaultOutputGroupForProduct } from '../db/productOutputDefaults'
 import {
@@ -91,6 +90,27 @@ function RefreshIcon(props: { className?: string }) {
     >
       <path d="M21 12a9 9 0 1 1-3-6.7" />
       <path d="M21 3v6h-6" />
+    </svg>
+  )
+}
+
+function CogIcon(props: { className?: string }) {
+  return (
+    <svg
+      className={props.className}
+      xmlns="http://www.w3.org/2000/svg"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+    >
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
     </svg>
   )
 }
@@ -462,7 +482,8 @@ export function PosScreen({
     status: number | null
   } | null>(null)
   const [diagPanelOpen, setDiagPanelOpen] = useState(false)
-  const [toolsOpen, setToolsOpen] = useState(false)
+  /** Unten: volle Werkzeug-/Diagnose-Leiste (Bon, Offline, Demo, …); standard eingeklappt */
+  const [footerToolbarExpanded, setFooterToolbarExpanded] = useState(false)
   const [pwaUpdateOfferOpen, setPwaUpdateOfferOpen] = useState(false)
   const [demoPreviewOpen, setDemoPreviewOpen] = useState(false)
   const [demoPreviewReceipts, setDemoPreviewReceipts] = useState<DemoPreviewReceiptItem[]>([])
@@ -527,19 +548,9 @@ export function PosScreen({
     [cartDepositDetails],
   )
   const totalWithDeposit = wareTotal + depositTotal
-  const pfandPayoutCategorySetting = useLiveQuery(
-    () => db.settings.get(PFAND_PAYOUT_CATEGORY_SETTING),
-    [],
-  )
-  const pfandPayoutCategoryId =
-    (pfandPayoutCategorySetting?.value ?? '').trim() || null
   const depositOptions = useMemo(() => {
     const map = new Map<string, DepositOption>()
-    const pool =
-      pfandPayoutCategoryId ?
-        productsForCart.filter((p) => p.categoryId === pfandPayoutCategoryId)
-      : productsForCart
-    for (const p of pool) {
+    for (const p of productsForCart) {
       const enabled = Boolean(p.depositEnabled) || Number(p.depositAmount ?? 0) > 0
       const amount = Math.max(0, Number(p.depositAmount ?? 0))
       if (!enabled || amount <= 0) continue
@@ -550,7 +561,7 @@ export function PosScreen({
       }
     }
     return [...map.values()].sort((a, b) => a.amountCents - b.amountCents || a.name.localeCompare(b.name, 'de'))
-  }, [productsForCart, pfandPayoutCategoryId])
+  }, [productsForCart])
   const saleAvailability = useMemo(
     () =>
       getSaleAvailability({
@@ -627,14 +638,6 @@ export function PosScreen({
       window.removeEventListener('online', onOnline)
     }
   }, [runApiDiagnostics])
-
-  useEffect(() => {
-    const mq = window.matchMedia('(min-width: 1024px)')
-    const sync = () => setToolsOpen(mq.matches)
-    sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
-  }, [])
 
   const apiConnected = apiDiag.healthReachable && apiDiag.apiReachable
   const modeLabel = demoMode ? 'Demo' : remoteMode ? 'Online / Server' : 'Offline / Lokal'
@@ -1623,10 +1626,8 @@ export function PosScreen({
                   {depositOptions.length === 0 ?
                     <div className="col-span-full flex min-h-[12rem] flex-col items-center justify-center gap-4 px-2 text-center">
                       <p className="text-sm font-semibold text-neutral-400">
-                        {pfandPayoutCategoryId ?
-                          'In der eingestellten Pfand-Kategorie sind keine Pfand-Artikel (mit Betrag > 0) vorhanden. Unter Admin · Kategorien prüfen und Spiegel ggf. mit „Als Pfand-Auswahl-Kategorie“ neu anstoßen.'
-                        : 'Keine Pfandarten aus dem Artikelstamm gefunden. Optional unter Admin eine Pfand-Auswahl-Kategorie festlegen.'
-                        }
+                        Keine Pfandarten im Stamm: Legen Sie beim Artikel einen Pfandbetrag &gt; 0 fest
+                        (Admin · Artikel).
                       </p>
                       <button
                         type="button"
@@ -1844,116 +1845,126 @@ export function PosScreen({
         </aside>
       </div>
 
-      <footer className="pos-checkout-footer flex min-h-0 min-w-0 flex-col gap-2 border-t border-[#ff003c]/30 bg-black px-3 pb-3 pt-2 md:px-5 lg:gap-3 lg:pb-4 lg:pt-3">
-        <div className="hidden grid-cols-1 gap-2 max-[1180px]:grid">
+      <footer className="pos-checkout-footer flex min-h-0 min-w-0 flex-col gap-2 border-t border-[#ff003c]/30 bg-black px-3 pb-2 pt-2 md:px-5 lg:pb-3 lg:pt-2">
+        <div className="flex min-h-[40px] items-center gap-2">
           <button
             type="button"
-            onClick={() => onOpenAdmin()}
-            title="Einstellungen und Artikelverwaltung öffnen."
-            className="flex min-h-[44px] items-center justify-center whitespace-nowrap rounded-lg border border-neutral-500 bg-neutral-900 px-3 py-2 text-xs font-black uppercase text-slate-200"
-          >
-            Einstellungen
-          </button>
-          <button
-            type="button"
-            className="min-h-[44px] rounded-lg border border-[#ff003c]/40 bg-neutral-950 px-3 py-2 text-xs font-black uppercase text-[#FFD700]"
-            onClick={() => setToolsOpen((v) => !v)}
-          >
-            Werkzeuge {toolsOpen ? '▴' : '▾'}
-          </button>
-        </div>
-
-        <div className="space-y-2 border-t border-white/10 pt-2">
-          <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-            <button
-              type="button"
-              className="rounded border border-white/15 bg-black/30 px-2 py-1 normal-case text-slate-300 hover:border-[#FFD700]/40"
-              onClick={() => setDiagPanelOpen((v) => !v)}
-              title="API-Diagnose"
-            >
-              Diagnose {diagPanelOpen ? '▴' : '▾'}
-            </button>
-            <span className="hidden min-w-0 truncate sm:inline normal-case">
-              {modeLabel} · API {apiConnected ? 'verbunden' : 'aus'}
-            </span>
-            <span className="hidden font-mono normal-case text-slate-500 md:inline">
-              {apiDiag.baseUrl || '/api'}
-            </span>
-          </div>
-          {diagPanelOpen &&
-            (() => {
-              const { version, buildFormatted } = buildMetaSummary()
-              return (
-                <div className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[10px] normal-case text-slate-400">
-                  <div>
-                    API_BASE_URL:{' '}
-                    <span className="font-mono text-slate-200">{apiDiag.baseUrl || '/api'}</span>
-                  </div>
-                  <div>
-                    Health (Origin):{' '}
-                    <span className="font-mono text-slate-200">{describeBackendHealthUrl()}</span>
-                  </div>
-                  <div>
-                    /health:{' '}
-                    <span className={apiDiag.healthReachable ? 'text-emerald-300' : 'text-rose-300'}>
-                      {apiDiag.healthReachable ? 'ok' : 'fail'}
-                    </span>
-                    {onlineModeCheckResult && (
-                      <span className="ml-1 text-slate-500">
-                        (HTTP {onlineModeCheckResult.status ?? 'Netzwerkfehler'}
-                        {onlineModeCheckResult.requiresAuth ? ' – Auth erforderlich' : ''})
-                      </span>
-                    )}
-                  </div>
-                  <div>
-                    Katalog:{' '}
-                    <span className="font-mono text-[9px] text-slate-500">
-                      {describeApiReachability('/catalog/categories')}
-                    </span>{' '}
-                    <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>
-                      {apiDiag.apiReachable ? 'ok' : 'fail'}
-                    </span>
-                  </div>
-                  <div>
-                    Pfand-Endpunkt:{' '}
-                    <span
-                      className={
-                        apiDiag.depositEndpointReachable ? 'text-emerald-300' : 'text-rose-300'
-                      }
-                    >
-                      {apiDiag.depositEndpointReachable ? 'ok' : 'fail'}
-                    </span>
-                  </div>
-                  <div>
-                    JWT:{' '}
-                    <span className={apiJwt ? 'text-emerald-300' : 'text-rose-300'}>
-                      {apiJwt ? 'vorhanden' : 'nicht gesetzt'}
-                    </span>
-                  </div>
-                  <div>
-                    Modus (remote / aktiv):{' '}
-                    <span className="text-slate-200">
-                      {remoteMode ? 'api' : 'offline'} / {dataMode}
-                    </span>
-                  </div>
-                  <div>
-                    Demo: <span className="text-slate-200">{demoMode ? 'ja' : 'nein'}</span>
-                  </div>
-                  <div>
-                    Version: <span className="text-slate-200">{version}</span> · Build:{' '}
-                    <span className="text-slate-200">{buildFormatted}</span>
-                  </div>
-                </div>
-              )
-            })()}
-
-          <div
+            onClick={() => setFooterToolbarExpanded((v) => !v)}
+            aria-expanded={footerToolbarExpanded}
+            title={
+              footerToolbarExpanded
+                ? 'Werkzeugleiste ausblenden'
+                : 'Werkzeuge, Diagnose & Einstellungen einblenden'
+            }
             className={[
-              toolsOpen
-                ? 'flex flex-wrap gap-2 lg:grid lg:grid-cols-6 lg:gap-2'
-                : 'hidden lg:grid lg:grid-cols-6 lg:gap-2',
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition',
+              footerToolbarExpanded
+                ? 'border-[#FFD700]/55 bg-[#FFD700]/10 text-[#FFD700]'
+                : 'border-white/20 bg-neutral-900/80 text-slate-200 hover:border-[#FFD700]/45 hover:text-white',
             ].join(' ')}
           >
+            <CogIcon />
+          </button>
+          {!footerToolbarExpanded && (
+            <span className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <span className="normal-case">{modeLabel}</span>
+              {' · API '}
+              <span className="normal-case">{apiConnected ? 'verbunden' : 'aus'}</span>
+              <span className="ml-1 hidden font-mono normal-case text-slate-600 sm:inline">
+                {apiDiag.baseUrl || '/api'}
+              </span>
+            </span>
+          )}
+        </div>
+
+        {footerToolbarExpanded && (
+          <div className="space-y-2 border-t border-white/10 pt-2">
+            <div className="flex flex-wrap items-center gap-2 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              <button
+                type="button"
+                className="rounded border border-white/15 bg-black/30 px-2 py-1 normal-case text-slate-300 hover:border-[#FFD700]/40"
+                onClick={() => setDiagPanelOpen((v) => !v)}
+                title="API-Diagnose"
+              >
+                Diagnose {diagPanelOpen ? '▴' : '▾'}
+              </button>
+              <span className="hidden min-w-0 truncate sm:inline normal-case">
+                {modeLabel} · API {apiConnected ? 'verbunden' : 'aus'}
+              </span>
+              <span className="hidden font-mono normal-case text-slate-500 md:inline">
+                {apiDiag.baseUrl || '/api'}
+              </span>
+            </div>
+            {diagPanelOpen &&
+              (() => {
+                const { version, buildFormatted } = buildMetaSummary()
+                return (
+                  <div className="rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-[10px] normal-case text-slate-400">
+                    <div>
+                      API_BASE_URL:{' '}
+                      <span className="font-mono text-slate-200">{apiDiag.baseUrl || '/api'}</span>
+                    </div>
+                    <div>
+                      Health (Origin):{' '}
+                      <span className="font-mono text-slate-200">{describeBackendHealthUrl()}</span>
+                    </div>
+                    <div>
+                      /health:{' '}
+                      <span
+                        className={apiDiag.healthReachable ? 'text-emerald-300' : 'text-rose-300'}
+                      >
+                        {apiDiag.healthReachable ? 'ok' : 'fail'}
+                      </span>
+                      {onlineModeCheckResult && (
+                        <span className="ml-1 text-slate-500">
+                          (HTTP {onlineModeCheckResult.status ?? 'Netzwerkfehler'}
+                          {onlineModeCheckResult.requiresAuth ? ' – Auth erforderlich' : ''})
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      Katalog:{' '}
+                      <span className="font-mono text-[9px] text-slate-500">
+                        {describeApiReachability('/catalog/categories')}
+                      </span>{' '}
+                      <span className={apiDiag.apiReachable ? 'text-emerald-300' : 'text-rose-300'}>
+                        {apiDiag.apiReachable ? 'ok' : 'fail'}
+                      </span>
+                    </div>
+                    <div>
+                      Pfand-Endpunkt:{' '}
+                      <span
+                        className={
+                          apiDiag.depositEndpointReachable ? 'text-emerald-300' : 'text-rose-300'
+                        }
+                      >
+                        {apiDiag.depositEndpointReachable ? 'ok' : 'fail'}
+                      </span>
+                    </div>
+                    <div>
+                      JWT:{' '}
+                      <span className={apiJwt ? 'text-emerald-300' : 'text-rose-300'}>
+                        {apiJwt ? 'vorhanden' : 'nicht gesetzt'}
+                      </span>
+                    </div>
+                    <div>
+                      Modus (remote / aktiv):{' '}
+                      <span className="text-slate-200">
+                        {remoteMode ? 'api' : 'offline'} / {dataMode}
+                      </span>
+                    </div>
+                    <div>
+                      Demo: <span className="text-slate-200">{demoMode ? 'ja' : 'nein'}</span>
+                    </div>
+                    <div>
+                      Version: <span className="text-slate-200">{version}</span> · Build:{' '}
+                      <span className="text-slate-200">{buildFormatted}</span>
+                    </div>
+                  </div>
+                )
+              })()}
+
+            <div className="flex flex-wrap gap-2 lg:grid lg:grid-cols-6 lg:gap-2">
             <button
               type="button"
               disabled={cart.length === 0 || printBusy}
@@ -2099,6 +2110,7 @@ export function PosScreen({
             </button>
           </div>
         </div>
+        )}
       </footer>
 
       {checkoutChoiceOpen && (

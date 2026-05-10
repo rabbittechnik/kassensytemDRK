@@ -178,7 +178,36 @@ export class DrkKasseDB extends Dexie {
       helperConsumptionItems: 'id, helperConsumptionId, productId',
     }).upgrade(async (tx) => {
       await tx.table<ProductRow, string>('products').toCollection().modify((p) => {
-        if (p.depositMirrorSourceId == null) p.depositMirrorSourceId = null
+        const row = p as ProductRow & { depositMirrorSourceId?: string | null }
+        if (row.depositMirrorSourceId == null) row.depositMirrorSourceId = null
+      })
+    })
+    this.version(8).stores({
+      categories: 'id, sortOrder, name',
+      products: 'id, categoryId, active, sortOrder, name, depositEnabled, depositName',
+      sales: 'id, dayKey, createdAt, receiptNo, eventId, depositVoucherNumber',
+      saleLines: 'id, saleId, categoryId, productId',
+      settings: 'key',
+      dualReceiptArchive: 'id, serverSaleId, receiptNo, createdAt',
+      receiptReprintLogs: '++id, saleRef, at',
+      events: 'id, status, startDate, endDate, name',
+      helpers: 'id, active, name',
+      helperConsumptions: 'id, helperGroup, consumptionType, eventId, createdAt, saleLikeNumber',
+      helperConsumptionItems: 'id, helperConsumptionId, productId',
+    }).upgrade(async (tx) => {
+      const obsoletePfandCatKey = 'pfand_payout_category_id'
+      await tx.table('settings').delete(obsoletePfandCatKey)
+
+      type P = ProductRow & { depositMirrorSourceId?: string | null }
+      const tbl = tx.table<P, string>('products')
+      const rows = await tbl.toArray()
+      await Promise.all(
+        rows.filter((r) => Boolean(r.depositMirrorSourceId)).map((r) => tbl.delete(r.id)),
+      )
+      await tbl.toCollection().modify((p) => {
+        delete (
+          p as ProductRow & { depositMirrorSourceId?: string | null }
+        ).depositMirrorSourceId
       })
     })
   }

@@ -1,11 +1,6 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useState } from 'react'
 import { db } from '../db/database'
-import {
-  PFAND_PAYOUT_CATEGORY_SETTING,
-  removeDepositMirrorsBySourceId,
-  syncDepositMirrorForProduct,
-} from '../db/depositMirror'
 import { setSetting } from '../db/sales'
 import { sha256Hex } from '../lib/pin'
 import { formatMoney } from '../lib/format'
@@ -188,7 +183,7 @@ function ProductsAdmin() {
             </tr>
           </thead>
           <tbody>
-            {(products ?? []).filter((p) => !p.depositMirrorSourceId).map((p) => {
+            {(products ?? []).map((p) => {
               const cname =
                 categories?.find((c) => c.id === p.categoryId)?.name ?? '—'
               const ogLabel =
@@ -302,9 +297,7 @@ function ProductEditor(props: {
         depositAmount,
         depositName: effectiveDepositEnabled ? (depositName.trim() || 'Pfand') : null,
         depositType: effectiveDepositEnabled ? depositType : null,
-        depositMirrorSourceId: null,
       })
-      await syncDepositMirrorForProduct(nid)
     } else if (existing) {
       await db.products.update(existing.id, {
         name: name.trim(),
@@ -318,7 +311,6 @@ function ProductEditor(props: {
         depositName: effectiveDepositEnabled ? (depositName.trim() || 'Pfand') : null,
         depositType: effectiveDepositEnabled ? depositType : null,
       })
-      await syncDepositMirrorForProduct(existing.id)
     }
     onClose()
   }, [
@@ -451,7 +443,6 @@ function ProductEditor(props: {
               className="rounded-xl border border-rose-500/40 bg-rose-500/10 px-4 py-2 text-rose-100"
               onClick={async () => {
                 if (confirm('Artikel wirklich löschen?')) {
-                  await removeDepositMirrorsBySourceId(existing.id)
                   await db.products.delete(existing.id)
                   onClose()
                 }
@@ -478,11 +469,6 @@ function CategoriesAdmin() {
     () => db.categories.orderBy('sortOrder').toArray(),
     [],
   )
-  const pfandCatSetting = useLiveQuery(
-    () => db.settings.get(PFAND_PAYOUT_CATEGORY_SETTING),
-    [],
-  )
-  const selectedPfandId = (pfandCatSetting?.value ?? '').trim()
 
   const add = useCallback(async () => {
     const name = window.prompt('Name der Kategorie?')
@@ -496,128 +482,45 @@ function CategoriesAdmin() {
     })
   }, [])
 
-  const setPfandCategory = useCallback(async (categoryId: string) => {
-    await setSetting(PFAND_PAYOUT_CATEGORY_SETTING, categoryId)
-    const prods = await db.products.toArray()
-    await Promise.all(prods.map((p) => syncDepositMirrorForProduct(p.id)))
-  }, [])
-
-  const addPfandCategory = useCallback(async () => {
-    const existing = categories?.find((c) => c.name.trim().toLowerCase() === 'pfand')
-    if (existing) {
-      await setPfandCategory(existing.id)
-      alert(
-        'Bestehende Kategorie Pfand wird als Pfand-Auswahl genutzt; Spiegel wurden aktualisiert.',
-      )
-      return
-    }
-    const last = await db.categories.orderBy('sortOrder').last()
-    const max = last?.sortOrder ?? 0
-    const id = crypto.randomUUID()
-    await db.categories.add({
-      id,
-      name: 'Pfand',
-      sortOrder: max + 10,
-    })
-    await setPfandCategory(id)
-  }, [categories, setPfandCategory])
-
-  const clearPfandCategory = useCallback(async () => {
-    const mirrors = await db.products
-      .filter((p) => Boolean(p.depositMirrorSourceId))
-      .toArray()
-    await Promise.all(mirrors.map((m) => db.products.delete(m.id)))
-    await db.settings.delete(PFAND_PAYOUT_CATEGORY_SETTING)
-  }, [])
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-lg font-semibold text-white">Kategorien</h2>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            className="rounded-xl border border-cyan-500/50 bg-cyan-950/30 px-4 py-2 text-sm font-semibold text-cyan-100 hover:bg-cyan-950/45"
-            onClick={() => void addPfandCategory()}
-            title="Legt „Pfand“ an (falls fehlend) und setzt sie als Pfand-Auswahl in der Kasse"
-          >
-            Pfand-Kategorie anlegen / wählen
-          </button>
-          <button
-            type="button"
-            className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/15"
-            onClick={() => void add()}
-          >
-            Neue Kategorie
-          </button>
-        </div>
+        <button
+          type="button"
+          className="rounded-xl bg-white/10 px-4 py-2 font-semibold text-white hover:bg-white/15"
+          onClick={() => void add()}
+        >
+          Neue Kategorie
+        </button>
       </div>
       <p className="rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-slate-400">
-        Die Pfand-Auswahl im Pfand-Reiter listet bei gesetzter Kategorie nur Artikel aus dieser
-        Kategorie. Automatische Spiegel („Pfand: …“) erscheinen dort, wenn ein anderer Artikel
-        Pfand hat; Spiegel sind in der Artikelliste ausgeblendet.
+        Der Pfand-Reiter in der Kasse bündelt alle Artikel mit hinterlegtem Pfand aus dem Stamm —
+        unabhängig von der Kategorie. Gleiche Pfandart (Name, Betrag, Typ) erscheint dort nur einmal.
       </p>
       <ul className="space-y-2">
         {(categories ?? []).map((c) => (
           <li
             key={c.id}
-            className={[
-              'flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-black/20 px-4 py-3',
-              selectedPfandId === c.id ? 'border-cyan-500/55' : 'border-white/10',
-            ].join(' ')}
+            className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3"
           >
-            <span className="flex flex-wrap items-center gap-2 font-medium text-slate-100">
-              {c.name}
-              {selectedPfandId === c.id && (
-                <span className="rounded-full border border-cyan-400/50 bg-cyan-950/40 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-cyan-200">
-                  Pfand-Auswahl
-                </span>
-              )}
-            </span>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className="text-sm text-cyan-300 hover:underline disabled:opacity-30"
-                onClick={() => void setPfandCategory(c.id)}
-              >
-                Als Pfand-Auswahl-Kategorie
-              </button>
-              {selectedPfandId === c.id && (
-                <button
-                  type="button"
-                  className="text-sm text-neutral-400 hover:text-neutral-200 hover:underline"
-                  onClick={() => {
-                    if (confirm('Pfand-Auswahl-Kategorie zurücksetzen? Automatische Spiegel werden entfernt.'))
-                      void clearPfandCategory()
-                  }}
-                >
-                  Zurücksetzen
-                </button>
-              )}
-              <button
-                type="button"
-                className="text-sm text-rose-300 hover:underline"
-                onClick={async () => {
-                  const cnt = await db.products
-                    .where('categoryId')
-                    .equals(c.id)
-                    .count()
-                  if (cnt > 0) {
-                    alert(
-                      `Kategorie enthält noch ${cnt} Artikel – bitte zuerst verschieben oder löschen.`,
-                    )
-                    return
-                  }
-                  if (selectedPfandId === c.id) {
-                    alert('Erst andere Pfand-Auswahl wählen oder zurücksetzen, dann löschen.')
-                    return
-                  }
-                  if (confirm('Kategorie löschen?')) await db.categories.delete(c.id)
-                }}
-              >
-                Löschen
-              </button>
-            </div>
+            <span className="font-medium text-slate-100">{c.name}</span>
+            <button
+              type="button"
+              className="text-sm text-rose-300 hover:underline"
+              onClick={async () => {
+                const cnt = await db.products.where('categoryId').equals(c.id).count()
+                if (cnt > 0) {
+                  alert(
+                    `Kategorie enthält noch ${cnt} Artikel – bitte zuerst verschieben oder löschen.`,
+                  )
+                  return
+                }
+                if (confirm('Kategorie löschen?')) await db.categories.delete(c.id)
+              }}
+            >
+              Löschen
+            </button>
           </li>
         ))}
       </ul>
