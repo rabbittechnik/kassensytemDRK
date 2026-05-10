@@ -1,0 +1,7 @@
+{
+  "folders": [
+    { "name": "Frontend · drk-kasse", "path": "." },
+    { "name": "API · drk-kasse-api", "path": "drk-kasse-api" }
+  ],
+  "settings": {}
+}
