@@ -331,106 +331,137 @@ function ProductEditor(props: {
   ])
 
   return (
-    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4 backdrop-blur">
-      <div className="panel-glass w-full max-w-md rounded-2xl p-6">
-        <h3 className="text-lg font-bold text-white">
-          {isNew ? 'Neuer Artikel' : 'Artikel bearbeiten'}
-        </h3>
-        <label className="mt-4 block text-sm text-slate-400">Name</label>
-        <input
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <label className="mt-3 block text-sm text-slate-400">Preis (EUR)</label>
-        <input
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white"
-          inputMode="decimal"
-          value={priceStr}
-          onChange={(e) => setPriceStr(e.target.value)}
-        />
-        <label className="mt-3 block text-sm text-slate-400">Kategorie</label>
-        <select
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-3 text-white"
-          value={categoryId}
-          onChange={(e) => setCategoryId(e.target.value)}
-        >
-          {catList.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-        <label className="mt-3 block text-sm text-slate-400">
-          Ausgabegruppe (Servier-/Ausgabe-Bon)
-        </label>
-        <select
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-3 text-white"
-          value={outputGroup}
-          onChange={(e) => setOutputGroup(e.target.value as ProductOutputGroup)}
-        >
-          {OUTPUT_GROUP_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <label className="mt-3 block text-sm text-slate-400">
-          Bild‑URL (optional, leer = Standard nach Artikel‑ID oder Emoji)
-        </label>
-        <input
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 font-mono text-sm text-white placeholder:text-slate-600"
-          placeholder="/assets/products/wasser.png"
-          value={imageUrl}
-          onChange={(e) => setImageUrl(e.target.value)}
-        />
-        <label className="mt-4 flex items-center gap-2 text-slate-200">
-          <input
-            type="checkbox"
-            checked={active}
-            onChange={(e) => setActive(e.target.checked)}
-          />
-          Im Verkauf sichtbar
-        </label>
-        <label className="mt-2 flex items-center gap-2 text-slate-200">
-          <input
-            type="checkbox"
-            checked={depositEnabled}
-            onChange={(e) => setDepositEnabled(e.target.checked)}
-          />
-          Pfand aktiv
-        </label>
-        <label className="mt-3 block text-sm text-slate-400">Pfandbetrag (EUR)</label>
-        <input
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white disabled:opacity-50"
-          inputMode="decimal"
-          disabled={!depositEnabled}
-          value={depositAmountStr}
-          onChange={(e) => setDepositAmountStr(e.target.value)}
-        />
-        <label className="mt-3 block text-sm text-slate-400">Pfandtyp</label>
-        <label className="mt-3 block text-sm text-slate-400">Pfandname</label>
-        <input
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-3 text-white disabled:opacity-50"
-          disabled={!depositEnabled && Number((parseFloat(depositAmountStr.replace(',', '.')) || 0)) <= 0}
-          value={depositName}
-          onChange={(e) => setDepositName(e.target.value)}
-          placeholder="Flasche/Dose"
-        />
-        <label className="mt-3 block text-sm text-slate-400">Pfandtyp</label>
-        <select
-          className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-3 text-white disabled:opacity-50"
-          disabled={!depositEnabled}
-          value={depositType}
-          onChange={(e) => setDepositType(e.target.value as DepositType)}
-        >
-          {DEPOSIT_TYPE_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label}
-            </option>
-          ))}
-        </select>
-        <div className="mt-6 flex justify-end gap-2">
+    <div className="fixed inset-0 z-[70] flex items-start justify-center overflow-y-auto bg-black/70 p-3 backdrop-blur sm:p-4">
+      <div className="panel-glass my-auto flex max-h-[min(92vh,calc(100dvh-1.5rem))] w-full max-w-4xl flex-col overflow-hidden rounded-2xl shadow-2xl">
+        <div className="shrink-0 border-b border-white/10 px-5 pb-3 pt-5 sm:px-6">
+          <h3 className="text-lg font-bold text-white">
+            {isNew ? 'Neuer Artikel' : 'Artikel bearbeiten'}
+          </h3>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4 sm:px-6">
+          <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-slate-400">Name</label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 text-white"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400">Preis (EUR)</label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 text-white"
+                  inputMode="decimal"
+                  value={priceStr}
+                  onChange={(e) => setPriceStr(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400">Kategorie</label>
+                <select
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-white"
+                  value={categoryId}
+                  onChange={(e) => setCategoryId(e.target.value)}
+                >
+                  {catList.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400">
+                  Ausgabegruppe (Servier-/Ausgabe-Bon)
+                </label>
+                <select
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-white"
+                  value={outputGroup}
+                  onChange={(e) => setOutputGroup(e.target.value as ProductOutputGroup)}
+                >
+                  {OUTPUT_GROUP_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm text-slate-400">
+                  Bild‑URL (optional, leer = Standard nach Artikel‑ID oder Emoji)
+                </label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 font-mono text-sm text-white placeholder:text-slate-600"
+                  placeholder="/assets/products/wasser.png"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                />
+              </div>
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={active}
+                  onChange={(e) => setActive(e.target.checked)}
+                />
+                Im Verkauf sichtbar
+              </label>
+              <label className="flex items-center gap-2 text-slate-200">
+                <input
+                  type="checkbox"
+                  checked={depositEnabled}
+                  onChange={(e) => setDepositEnabled(e.target.checked)}
+                />
+                Pfand aktiv
+              </label>
+              <div>
+                <label className="block text-sm text-slate-400">Pfandbetrag (EUR)</label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 text-white disabled:opacity-50"
+                  inputMode="decimal"
+                  disabled={!depositEnabled}
+                  value={depositAmountStr}
+                  onChange={(e) => setDepositAmountStr(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400">Pfandname</label>
+                <input
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 text-white disabled:opacity-50"
+                  disabled={
+                    !depositEnabled &&
+                    Number(parseFloat(depositAmountStr.replace(',', '.')) || 0) <= 0
+                  }
+                  value={depositName}
+                  onChange={(e) => setDepositName(e.target.value)}
+                  placeholder="Flasche/Dose"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-400">Pfandtyp</label>
+                <select
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-black/40 px-3 py-2.5 text-white disabled:opacity-50"
+                  disabled={!depositEnabled}
+                  value={depositType}
+                  onChange={(e) => setDepositType(e.target.value as DepositType)}
+                >
+                  {DEPOSIT_TYPE_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-white/10 bg-black/20 px-5 py-4 sm:px-6">
           <button
             type="button"
             className="rounded-xl border border-white/15 px-4 py-2 text-slate-200"
