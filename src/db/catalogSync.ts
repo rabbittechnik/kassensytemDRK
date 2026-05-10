@@ -16,7 +16,11 @@ import { defaultOutputGroupForProduct } from './productOutputDefaults'
 /** Settings-Key (JSON Array von Produkt-IDs); gelöscht offline / bei fehlgeschlagener Server-Löschung */
 export const CATALOG_PENDING_DELETED_PRODUCT_IDS = 'catalog_pending_deleted_product_ids'
 
+/** Admin hat Pfand bewusst entfernt — Push darf Server-Pfand nicht mit „lokal 0“ überschreiben, außer diese IDs. */
+export const CATALOG_DEPOSIT_CLEARED_IDS = 'catalog_deposit_cleared_ids'
+
 const MAX_PENDING = 2000
+const MAX_DEPOSIT_CLEARED = 2000
 
 export function parsePendingDeletedProductIdsFromValue(val: string | undefined | null): Set<string> {
   if (!val?.trim()) return new Set()
@@ -49,6 +53,112 @@ async function writePendingDeletedProductIds(ids: string[]): Promise<void> {
     key: CATALOG_PENDING_DELETED_PRODUCT_IDS,
     value: JSON.stringify(uniq),
   })
+}
+
+async function readDepositClearedIds(): Promise<Set<string>> {
+  const row = await db.settings.get(CATALOG_DEPOSIT_CLEARED_IDS)
+  try {
+    const arr = JSON.parse(row?.value ?? '[]') as unknown
+    if (!Array.isArray(arr)) return new Set()
+    return new Set(
+      arr
+        .filter((x): x is string => typeof x === 'string' && x.length > 0)
+        .map((id) => id.trim())
+        .filter(Boolean),
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+async function writeDepositClearedIds(ids: Set<string>): Promise<void> {
+  const uniq = [...new Set(ids)].slice(0, MAX_DEPOSIT_CLEARED)
+  if (uniq.length === 0) {
+    await db.settings.delete(CATALOG_DEPOSIT_CLEARED_IDS)
+    return
+  }
+  await db.settings.put({
+    key: CATALOG_DEPOSIT_CLEARED_IDS,
+    value: JSON.stringify(uniq),
+  })
+}
+
+/** Nach „Speichern“ im Admin, wenn Pfand ausgeschaltet und Betrag 0 — damit Sync den Server nicht aus Versehen mit Server-Pfand überschreibt… */
+export async function markProductDepositExplicitlyCleared(productId: string): Promise<void> {
+  const id = productId.trim()
+  if (!id) return
+  const s = await readDepositClearedIds()
+  s.add(id)
+  await writeDepositClearedIds(s)
+}
+
+export async function unmarkProductDepositCleared(productId: string): Promise<void> {
+  const id = productId.trim()
+  if (!id) return
+  const s = await readDepositClearedIds()
+  if (!s.delete(id)) return
+  await writeDepositClearedIds(s)
+}
+
+function depositPayloadForCatalogPush(
+  local: ProductRow,
+  server: ProductRow | undefined,
+  cleared: Set<string>,
+): {
+  depositEnabled: boolean
+  depositAmount: number
+  depositName: string | null
+  depositType: ProductRow['depositType']
+} {
+  const la = Math.max(0, Number(local.depositAmount ?? 0))
+  const localOn = Boolean(local.depositEnabled) || la > 0
+
+  if (cleared.has(local.id)) {
+    return {
+      depositEnabled: false,
+      depositAmount: 0,
+      depositName: null,
+      depositType: null,
+    }
+  }
+
+  if (la > 0) {
+    return {
+      depositEnabled: true,
+      depositAmount: la,
+      depositName: local.depositName?.trim() || null,
+      depositType: local.depositType ?? null,
+    }
+  }
+
+  if (!server) {
+    return {
+      depositEnabled: localOn,
+      depositAmount: la,
+      depositName: local.depositName ?? null,
+      depositType: local.depositType ?? null,
+    }
+  }
+
+  const sa = Math.max(0, Number(server.depositAmount ?? 0))
+  const srvOn = Boolean(server.depositEnabled) || sa > 0
+
+  /** Lokaler Stamm noch nie mit Pfand gefüllt — Server-Pfand nicht mit lokalen Nullen löschen. */
+  if (srvOn && sa > 0) {
+    return {
+      depositEnabled: true,
+      depositAmount: sa,
+      depositName: server.depositName ?? null,
+      depositType: server.depositType ?? null,
+    }
+  }
+
+  return {
+    depositEnabled: false,
+    depositAmount: 0,
+    depositName: null,
+    depositType: null,
+  }
 }
 
 async function addPendingDeletedProductId(id: string): Promise<void> {
@@ -135,6 +245,17 @@ export function mapRemoteCategoryRow(raw: Record<string, unknown>): CategoryRow 
 
 async function pushDexieCatalogToServerAdmin(): Promise<void> {
   const pendingDeletes = await readPendingDeletedProductIds()
+  const cleared = await readDepositClearedIds()
+
+  const serverById = new Map<string, ProductRow>()
+  const pr = await apiJson<unknown[]>('/catalog/products')
+  if (Array.isArray(pr)) {
+    for (const row of pr) {
+      const m = mapRemoteCatalogProduct(row as Record<string, unknown>)
+      serverById.set(m.id, m)
+    }
+  }
+
   const categories = await db.categories.orderBy('sortOrder').toArray()
   const products = await db.products.toArray()
   await apiJson<{ ok: boolean }>(
@@ -148,26 +269,30 @@ async function pushDexieCatalogToServerAdmin(): Promise<void> {
           name: c.name.trim(),
           sortOrder: Number(c.sortOrder ?? 0),
         })),
-        products: products.map((p) => ({
-          id: p.id,
-          categoryId: p.categoryId,
-          name: p.name.trim(),
-          priceCents: Math.max(0, Number(p.priceCents ?? 0)),
-          active: Boolean(p.active),
-          sortOrder: Number(p.sortOrder ?? 0),
-          stockTracking: Boolean(p.stockTracking),
-          stockQty: p.stockQty == null ? null : Number(p.stockQty),
-          stockMin: p.stockMin == null ? null : Number(p.stockMin),
-          depositEnabled: Boolean(p.depositEnabled ?? false) || Number(p.depositAmount ?? 0) > 0,
-          depositAmount: Math.max(0, Number(p.depositAmount ?? 0)),
-          depositName: p.depositName ?? null,
-          depositType: p.depositType ?? null,
-        })),
+        products: products.map((p) => {
+          const dep = depositPayloadForCatalogPush(p, serverById.get(p.id), cleared)
+          return {
+            id: p.id,
+            categoryId: p.categoryId,
+            name: p.name.trim(),
+            priceCents: Math.max(0, Number(p.priceCents ?? 0)),
+            active: Boolean(p.active),
+            sortOrder: Number(p.sortOrder ?? 0),
+            stockTracking: Boolean(p.stockTracking),
+            stockQty: p.stockQty == null ? null : Number(p.stockQty),
+            stockMin: p.stockMin == null ? null : Number(p.stockMin),
+            depositEnabled: dep.depositEnabled,
+            depositAmount: dep.depositAmount,
+            depositName: dep.depositName,
+            depositType: dep.depositType,
+          }
+        }),
       }),
       skipDemoHeader: true,
     },
   )
   await clearPendingDeletedProductIdsAfterSuccessfulPush()
+  await db.settings.delete(CATALOG_DEPOSIT_CLEARED_IDS)
 }
 
 /**
@@ -275,8 +400,9 @@ export type CatalogSyncOutcome = {
 }
 
 /**
- * Offline-Stamm als Quelle für den Server (Admin), dann Server → IndexedDB.
- * Kassierer: nur Pull vom Server → lokale Datenbank entspricht dem Server-Stamm für Offline später.
+ * Admin: Push lokaler Stamm → Server (Pfand-Felder werden mit GET /catalog/products gemerged,
+ * damit veraltete lokale „0“ den Server-Pfand nicht löschen), dann Pull → IndexedDB.
+ * Kassierer: nur Pull vom Server → lokale DB für Offline wie Server-Stamm.
  */
 export async function syncCatalogBidirectional(): Promise<CatalogSyncOutcome> {
   if (isDemoMode()) {

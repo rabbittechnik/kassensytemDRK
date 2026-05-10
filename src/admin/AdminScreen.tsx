@@ -1,6 +1,10 @@
 import { useLiveQuery } from 'dexie-react-hooks'
 import { useCallback, useEffect, useState } from 'react'
-import { deleteCatalogProductLocalAndRemote } from '../db/catalogSync'
+import {
+  deleteCatalogProductLocalAndRemote,
+  markProductDepositExplicitlyCleared,
+  unmarkProductDepositCleared,
+} from '../db/catalogSync'
 import { db } from '../db/database'
 import { setSetting } from '../db/sales'
 import { sha256Hex } from '../lib/pin'
@@ -312,6 +316,11 @@ function ProductEditor(props: {
         depositName: effectiveDepositEnabled ? (depositName.trim() || 'Pfand') : null,
         depositType: effectiveDepositEnabled ? depositType : null,
       })
+      if (!effectiveDepositEnabled && depositAmount <= 0) {
+        await markProductDepositExplicitlyCleared(existing.id)
+      } else if (effectiveDepositEnabled && depositAmount > 0) {
+        await unmarkProductDepositCleared(existing.id)
+      }
     }
     onClose()
   }, [

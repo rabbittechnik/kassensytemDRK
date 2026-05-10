@@ -558,7 +558,7 @@ export function PosScreen({
           if (sync.ok) {
             setToast(
               sync.pushed ?
-                'Katalog synchron: lokaler Artikelstamm wurde zum Server übertragen.'
+                'Katalog synchron: Server aktualisiert und lokale Datenbank mit dem Server-Stamm abgeglichen (Pfand & Artikel).'
               : 'Katalog vom Server übernommen (lokale DB aktualisiert).',
             )
             window.setTimeout(() => setToast(null), 4200)
@@ -1638,10 +1638,23 @@ export function PosScreen({
                 <>
                   {depositOptions.length === 0 ?
                     <div className="col-span-full flex min-h-[12rem] flex-col items-center justify-center gap-4 px-2 text-center">
-                      <p className="text-sm font-semibold text-neutral-400">
-                        Keine Pfandarten im Stamm: Legen Sie beim Artikel einen Pfandbetrag &gt; 0 fest
-                        (Admin · Artikel).
-                      </p>
+                      <div className="max-w-lg space-y-2">
+                        <p className="text-sm font-semibold text-neutral-400">
+                          Keine Pfandarten im Stamm: Die Buttons kommen aus Artikeln mit Pfandbetrag &gt; 0
+                          (Admin · Artikel).
+                        </p>
+                        {!remoteMode && (
+                          <p className="text-xs leading-snug text-slate-500">
+                            <strong className="font-semibold text-slate-400">Offline</strong> nutzt nur die{' '}
+                            <strong className="font-semibold text-slate-400">lokal gespeicherte</strong>{' '}
+                            Artikelliste. Online werden die Daten vom Server geladen; nach Pfand-Änderungen auf
+                            dem Server kurz{' '}
+                            <strong className="font-semibold text-slate-400">Online</strong> schalten und die
+                            Meldung „Katalog vom Server übernommen …“ abwarten – dann stehen die Pfandarten auch
+                            offline zur Verfügung.
+                          </p>
+                        )}
+                      </div>
                       <button
                         type="button"
                         onClick={() => void openDepositRedeemModal(null)}
