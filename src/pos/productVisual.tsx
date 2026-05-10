@@ -1,12 +1,25 @@
 import { useMemo, useState } from 'react'
 
+/** Bricht alte Service-Worker-Caches unter `/assets/products/*` beim Release. */
+const ASSET_IMG_V =
+  typeof import.meta.env.VITE_APP_VERSION === 'string'
+    ? import.meta.env.VITE_APP_VERSION.trim()
+    : ''
+
+function withProductAssetVersion(relPath: string): string {
+  if (!relPath.startsWith('/') || !ASSET_IMG_V) return relPath
+  const sep = relPath.includes('?') ? '&' : '?'
+  return `${relPath}${sep}v=${encodeURIComponent(ASSET_IMG_V)}`
+}
+
 /** Dateiname unter `public/assets/products/` ohne `p-`, ggf. Sonder-Mapping */
 const ID_TO_PRODUCT_SLUG: Record<string, string> = {
   'p-rote': 'rote-wurst',
   'p-bitterlemon': 'bitter-lemon',
   'p-kuchenstueck': 'kuchenstueck',
   'p-broetchen': 'broetchen',
-  'p-veg': 'vegetarisch',
+  /** Eigene Datei: umgeht dauerhaft gecachte alte „vegetarisch.png“ unter SW „CacheFirst“. */
+  'p-veg': 'veg-maultaschen-burger',
   /** Kombi-Angebot */
   'p-kk': '',
 }
@@ -17,7 +30,7 @@ function autoImageHref(productId: string): string | null {
   if (slug === '') return null
   const fileStem = slug ?? productId.slice(2)
   if (!fileStem) return null
-  return `/assets/products/${fileStem}.png`
+  return withProductAssetVersion(`/assets/products/${fileStem}.png`)
 }
 
 function resolvedImageSrc(
@@ -25,8 +38,10 @@ function resolvedImageSrc(
   imageUrl?: string | null,
 ): string | null {
   const u = imageUrl?.trim()
-  if (u) return u
-  return autoImageHref(productId)
+  const href = u || autoImageHref(productId)
+  if (!href) return null
+  if (href.startsWith('/')) return withProductAssetVersion(href)
+  return href
 }
 
 function emojiForProduct(name: string): string {
@@ -46,7 +61,8 @@ function emojiForProduct(name: string): string {
   if (n.includes('wurst') || n.includes('curry')) return '🌭'
   if (n.includes('pommes')) return '🍟'
   if (n.includes('brötchen')) return '🥐'
-  if (n.includes('vegetar')) return '🥗'
+  /** Kein 🥗 als Fallback (wirkt wie Salatblatt) – Maultaschen-Burger-Bezug */
+  if (n.includes('vegetar')) return '🍔'
   if (n.includes('kuchen') || n.includes('torte')) return '🍰'
   if (n.includes('muffin')) return '🧁'
   if (n.includes('kombi')) return '🫖'

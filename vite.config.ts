@@ -137,12 +137,13 @@ export default defineConfig({
           },
           {
             urlPattern: /^.*\/assets\/products\/.*\.(?:png|jpe?g|webp)$/,
-            handler: 'CacheFirst',
+            /** Aktualisiert Bilder nach Deploy (nicht mehr 30 Tage statisch aus SW). */
+            handler: 'StaleWhileRevalidate',
             options: {
-              cacheName: 'dlrg-products',
+              cacheName: `dlrg-products-${pkg.version}`,
               expiration: {
                 maxEntries: 200,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
+                maxAgeSeconds: 60 * 60 * 24 * 7,
               },
             },
           },
