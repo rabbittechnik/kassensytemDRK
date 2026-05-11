@@ -56,6 +56,58 @@ export const DEFAULT_ISSUER = {
   vatId: '',
 }
 
+/** Feste IDs: INSERT OR IGNORE bei jedem Start – fehlende Vereine nachziehen, keine Duplikate. */
+const DEFAULT_TEAMS: Array<{
+  id: string
+  name: string
+  shortName: string
+  billingAddress: string
+  invoiceEmail: string
+}> = [
+  {
+    id: 'team-dlrg-bezirk-tuebingen',
+    name: 'DLRG Bezirk Tübingen',
+    shortName: 'Bezirk Tübingen',
+    billingAddress: 'Mühlbachstr. 8, 72411 Bodelshausen',
+    invoiceEmail: 'info@bez-tuebingen.dlrg.de',
+  },
+  {
+    id: 'team-dlrg-og-dettenhausen',
+    name: 'DLRG Ortsgruppe Dettenhausen',
+    shortName: 'Dettenhausen',
+    billingAddress: 'Birkenwaldstr. 8, 72135 Dettenhausen',
+    invoiceEmail: 'info@dettenhausen.dlrg.de',
+  },
+  {
+    id: 'team-dlrg-og-kirchentellinsfurt',
+    name: 'DLRG Ortsgruppe Kirchentellinsfurt',
+    shortName: 'Kirchentellinsfurt',
+    billingAddress: 'Neue Steige 25, 72138 Kirchentellinsfurt',
+    invoiceEmail: 'info@kirchentellinsfurt.dlrg.de',
+  },
+  {
+    id: 'team-dlrg-og-moessingen',
+    name: 'DLRG Ortsgruppe Mössingen',
+    shortName: 'Mössingen',
+    billingAddress: 'Albblickstraße 35, 72116 Mössingen',
+    invoiceEmail: 'info@moessingen.dlrg.de',
+  },
+  {
+    id: 'team-dlrg-og-rottenburg',
+    name: 'DLRG Ortsgruppe Rottenburg',
+    shortName: 'Rottenburg',
+    billingAddress: 'Sülchenstraße 24, 72108 Rottenburg',
+    invoiceEmail: 'info@rottenburg.dlrg.de',
+  },
+  {
+    id: 'team-dlrg-og-tuebingen',
+    name: 'DLRG Ortsgruppe Tübingen',
+    shortName: 'Tübingen',
+    billingAddress: 'Karlstr. 2/1, 72072 Tübingen',
+    invoiceEmail: 'info@tuebingen.dlrg.de',
+  },
+]
+
 export function seedIfNeeded(
   db: BetterSqlite3.Database,
   opts: {
@@ -113,4 +165,33 @@ export function seedIfNeeded(
 
   ins.run('active_event_id', '')
   ins.run('allow_sales_without_event', '1')
+
+  const insTeam = db.prepare(
+    `INSERT OR IGNORE INTO teams (
+      id, name, short_name, contact_name, invoice_email, phone, billing_address,
+      customer_no, internal_note, active, default_payment_days,
+      cost_center, department, local_group, created_at, updated_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  )
+  const nowTeams = Date.now()
+  for (const t of DEFAULT_TEAMS) {
+    insTeam.run(
+      t.id,
+      t.name,
+      t.shortName,
+      '',
+      t.invoiceEmail,
+      '',
+      t.billingAddress,
+      null,
+      '',
+      1,
+      14,
+      null,
+      null,
+      null,
+      nowTeams,
+      nowTeams,
+    )
+  }
 }
