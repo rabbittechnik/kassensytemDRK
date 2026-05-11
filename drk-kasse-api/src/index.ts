@@ -1320,7 +1320,9 @@ async function guardedRoutes(app: FastifyInstance) {
   })
 
   app.post('/daily-closings/create', async (req, reply) => {
-    if (!isAdmin(req.user.role)) return reply.code(403).send({ error: 'FORBIDDEN' })
+    if (!(isAdmin(req.user.role) || req.user.role === 'cashier')) {
+      return reply.code(403).send({ error: 'FORBIDDEN' })
+    }
     const b = z
       .object({
         dayKey: z.string().optional(),

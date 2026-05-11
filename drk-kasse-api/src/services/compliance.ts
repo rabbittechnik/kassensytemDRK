@@ -423,7 +423,23 @@ export function createDailyClosing(params: {
       userId: params.user.sub,
       payload: { closingId: id, closingNumber: closingNo, day: params.day },
     })
-    return { id, closingNumber: closingNo, csvRelPath: csvRel, pdfRelPath: pdfRel }
+    return {
+      id,
+      closingNumber: closingNo,
+      csvRelPath: csvRel,
+      pdfRelPath: pdfRel,
+      dayKey: params.day,
+      eventId: eid,
+      grossTotalCents: total,
+      cashTotalCents: cash,
+      cardTotalCents: card,
+      invoiceTotalCents: invoice,
+      salesCount: sales.length,
+      stornoCount,
+      stornoTotalCents: stornoTotal,
+      depositBalanceCents: depositBalance,
+      byCategory: byCategory.map((x) => ({ categoryId: x.categoryId, totalCents: x.totalCents })),
+    }
   })
 }
 

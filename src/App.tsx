@@ -378,7 +378,9 @@ export default function App() {
                 }
               />
             )}
-            {zOpen && <ZReportModal onClose={() => setZOpen(false)} />}
+            {zOpen && (
+              <ZReportModal dataMode={effectiveDataMode} onClose={() => setZOpen(false)} />
+            )}
           </div>
           <OfflineIndicator />
         </div>
