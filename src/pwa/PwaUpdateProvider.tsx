@@ -113,9 +113,67 @@ export function PwaUpdateProvider({ children }: { children: ReactNode }) {
     }
   }, [registration])
 
+  /**
+   * Bei `registerType: 'autoUpdate'` ruft `updateServiceWorker()` aus virtual:pwa-register
+   * absichtlich kein `messageSkipWaiting()` auf — ein Klick „Jetzt aktualisieren“ würde sonst
+   * oft nichts tun. Hier: Worker prüfen, ggf. SKIP_WAITING, Caches leeren, SW abmelden, hart neu laden.
+   */
   const applyUpdate = useCallback(async () => {
     await updateServiceWorker(true)
-  }, [updateServiceWorker])
+
+    let reg = registration ?? (await navigator.serviceWorker.getRegistration())
+    try {
+      await reg?.update()
+    } catch {
+      /* ignore */
+    }
+
+    for (let i = 0; i < 30; i++) {
+      reg = (await navigator.serviceWorker.getRegistration()) ?? reg
+      if (reg?.waiting) break
+      await new Promise((r) => setTimeout(r, 150))
+    }
+
+    reg = (await navigator.serviceWorker.getRegistration()) ?? reg
+    if (reg?.waiting) {
+      try {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' })
+      } catch {
+        /* ignore */
+      }
+      await new Promise<void>((resolve) => {
+        const ms = 12000
+        const t = window.setTimeout(resolve, ms)
+        navigator.serviceWorker.addEventListener(
+          'controllerchange',
+          () => {
+            window.clearTimeout(t)
+            resolve()
+          },
+          { once: true },
+        )
+      })
+    }
+
+    try {
+      if ('caches' in window) {
+        const keys = await caches.keys()
+        await Promise.all(keys.map((k) => caches.delete(k)))
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const r = await navigator.serviceWorker.getRegistration()
+      await r?.unregister()
+    } catch {
+      /* ignore */
+    }
+
+    const url = new URL(window.location.href)
+    url.searchParams.set('_pwa_reload', String(Date.now()))
+    window.location.replace(url.toString())
+  }, [registration, updateServiceWorker])
 
   const value = useMemo(
     () => ({ checkForUpdate, applyUpdate, offlineReady }),
