@@ -226,7 +226,7 @@ export function ZReportModal(props: { dataMode: 'api' | 'offline'; onClose: () =
           </button>
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-3">
+        <div className="mt-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
           <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/5 p-4">
             <div className="text-xs uppercase text-cyan-200/80">Verkäufe</div>
             <div className="mt-1 text-3xl font-bold text-white">
@@ -245,12 +245,13 @@ export function ZReportModal(props: { dataMode: 'api' | 'offline'; onClose: () =
               {formatMoney(cardTotal)}
             </div>
           </div>
-        </div>
-        {invoiceTotal !== 0 && (
-          <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-2 text-sm text-amber-100">
-            Rechnung (Summe): {formatMoney(invoiceTotal)}
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4">
+            <div className="text-xs uppercase text-amber-200/90">Auf Rechnung</div>
+            <div className="mt-1 text-2xl font-bold text-white">
+              {formatMoney(invoiceTotal)}
+            </div>
           </div>
-        )}
+        </div>
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-black/20 p-4">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-slate-400">

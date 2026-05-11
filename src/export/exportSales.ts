@@ -70,6 +70,15 @@ export async function exportSalesCsv(dayKey?: string): Promise<void> {
 export async function exportDayReportPdf(dayKey: string): Promise<void> {
   const sales = await db.sales.where('dayKey').equals(dayKey).toArray()
   const total = sales.reduce((s, x) => s + x.totalCents, 0)
+  const cashTotal = sales
+    .filter((s) => s.paymentMethod === 'cash')
+    .reduce((a, s) => a + s.totalCents, 0)
+  const cardTotal = sales
+    .filter((s) => s.paymentMethod === 'card')
+    .reduce((a, s) => a + s.totalCents, 0)
+  const invoiceTotal = sales
+    .filter((s) => s.paymentMethod === 'invoice')
+    .reduce((a, s) => a + s.totalCents, 0)
 
   const lines = await db.saleLines.toArray()
   const dayLines = lines.filter((l) => {
@@ -95,6 +104,12 @@ export async function exportDayReportPdf(dayKey: string): Promise<void> {
   doc.text(`Verkäufe: ${sales.length}`, 20, y)
   y += 8
   doc.text(`Summe: ${formatMoney(total)}`, 20, y)
+  y += 8
+  doc.text(`Bar: ${formatMoney(cashTotal)}`, 20, y)
+  y += 6
+  doc.text(`Karte: ${formatMoney(cardTotal)}`, 20, y)
+  y += 6
+  doc.text(`Auf Rechnung: ${formatMoney(invoiceTotal)}`, 20, y)
   y += 12
   doc.setFontSize(12)
   doc.text('Nach Kategorie', 20, y)

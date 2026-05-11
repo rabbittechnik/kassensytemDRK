@@ -79,6 +79,15 @@ export function exportDemoSalesCsv(dayKey: string, sales: DemoSale[]): void {
 export function exportDemoDayReportPdf(dayKey: string, sales: DemoSale[]): void {
   const dayly = sales.filter((s) => s.dayKey === dayKey)
   const total = dayly.reduce((s, x) => s + x.totalCents, 0)
+  const cashTotal = dayly
+    .filter((s) => s.paymentMethod === 'cash')
+    .reduce((a, s) => a + s.totalCents, 0)
+  const cardTotal = dayly
+    .filter((s) => s.paymentMethod === 'card')
+    .reduce((a, s) => a + s.totalCents, 0)
+  const invoiceTotal = dayly
+    .filter((s) => s.paymentMethod === 'invoice')
+    .reduce((a, s) => a + s.totalCents, 0)
   const byCat = new Map<string, number>()
   for (const s of dayly) {
     for (const l of s.lines) {
@@ -102,6 +111,12 @@ export function exportDemoDayReportPdf(dayKey: string, sales: DemoSale[]): void 
   doc.text(`Demo-Verkäufe: ${dayly.length}`, 20, y)
   y += 8
   doc.text(`Summe (DEMO): ${formatMoney(total)}`, 20, y)
+  y += 8
+  doc.text(`Bar (DEMO): ${formatMoney(cashTotal)}`, 20, y)
+  y += 6
+  doc.text(`Karte (DEMO): ${formatMoney(cardTotal)}`, 20, y)
+  y += 6
+  doc.text(`Auf Rechnung (DEMO): ${formatMoney(invoiceTotal)}`, 20, y)
   y += 12
   doc.setFontSize(12)
   doc.text('Nach Kategorie (DEMO)', 20, y)
